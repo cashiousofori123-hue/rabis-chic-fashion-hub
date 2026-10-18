@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@keyframes spinRadar {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-radar {
+  animation: spinRadar 4s linear infinite;
+}
+
+@media print {
+  body * { visibility: hidden; }
+  #invoiceModal, #invoiceModal * { visibility: visible; }
+  #invoiceModal { position: absolute; left: 0; top: 0; width: 100%; }
+  .no-print { display: none !important; }
+}
