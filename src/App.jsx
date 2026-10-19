@@ -1,4 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
+import { LogOut } from 'lucide-react';
+import api from './api';
+import { useAuth } from './context/AuthContext';
+const TrackOrder = lazy(() => import('./components/TrackOrder'));
 
 // Production Initial Catalog
 const INITIAL_PRODUCTS = [
@@ -62,13 +66,38 @@ const ALL_CATEGORIES = [
   "Official dresses"
 ];
 
+const optimizeProductImage = (imageUrl) => {
+  try {
+    const url = new URL(imageUrl);
+    if (url.hostname === 'images.unsplash.com') {
+      url.searchParams.set('w', '400');
+      url.searchParams.set('h', '500');
+      url.searchParams.set('fit', 'crop');
+      url.searchParams.set('q', '70');
+      url.searchParams.set('auto', 'format');
+      url.searchParams.set('fm', 'webp');
+    }
+    return url.toString();
+  } catch {
+    return imageUrl;
+  }
+};
+
 export default function App() {
+  const { user, role, login, signup, logout } = useAuth();
   // Navigation State
   const [activeView, setActiveView] = useState('store'); // 'store', 'tracker', 'lookup', 'about', 'contact', 'admin'
   const [adminTab, setAdminTab] = useState('overview'); // 'overview', 'approvals', 'messages', 'catalog', 'contact', 'security'
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const isAdminAuthenticated = role === 'admin';
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [isSigningUp, setIsSigningUp] = useState(false);
+  const [authMessage, setAuthMessage] = useState('');
+  const [pendingUsers, setPendingUsers] = useState([]);
+  const [riders, setRiders] = useState([]);
+  const [transferEmail, setTransferEmail] = useState('');
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -122,8 +151,7 @@ export default function App() {
 
   // Orders & Messages State
   const [orders, setOrders] = useState(() => {
-    const saved = localStorage.getItem('rabi_orders');
-    return saved ? JSON.parse(saved) : [];
+    return [];
   });
 
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState(null);
@@ -148,16 +176,15 @@ export default function App() {
     roomNumber: '',
     selectedProductId: 1,
     customItemName: '',
-    quantity: 1
+    quantity: 1,
+    deliveryOption: 'standard',
+    paymentMethod: 'MTN MoMo'
   });
 
   const [orderStage, setOrderStage] = useState('idle');
   const [showCallModal, setShowCallModal] = useState(false);
 
   // Security Settings State
-  const [currPassInput, setCurrPassInput] = useState('');
-  const [newPassInput, setNewPassInput] = useState('');
-  const [passAlert, setPassAlert] = useState({ show: false, msg: '', type: '' });
 
   // Local Storage Sync
   useEffect(() => {
@@ -167,10 +194,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('rabi_slides', JSON.stringify(slides));
   }, [slides]);
-
-  useEffect(() => {
-    localStorage.setItem('rabi_orders', JSON.stringify(orders));
-  }, [orders]);
 
   useEffect(() => {
     localStorage.setItem('rabi_messages', JSON.stringify(messages));
@@ -184,14 +207,24 @@ export default function App() {
     localStorage.setItem('rabi_admin_contact', JSON.stringify(adminContact));
   }, [adminContact]);
 
-  if (!localStorage.getItem('rabi_admin_password')) {
-    localStorage.setItem('rabi_admin_password', 'admin123');
-  }
-
   const currentOrderProduct = products.find(p => p.id === Number(checkoutData.selectedProductId)) || products[0];
   const orderSubtotal = (currentOrderProduct?.price || 0) * checkoutData.quantity;
-  const orderDeliveryFee = 10;
+  const deliveryFees = { standard: 30, express: 60, outside: 80 };
+  const orderDeliveryFee = deliveryFees[checkoutData.deliveryOption];
   const orderTotal = orderSubtotal + orderDeliveryFee;
+
+  useEffect(() => {
+    api.get('/products').then(({ data }) => setProducts(data)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isAdminAuthenticated && role !== 'rider') return;
+    api.get('/orders').then(({ data }) => setOrders(data)).catch(() => setOrders([]));
+    if (isAdminAuthenticated) {
+      api.get('/users/pending').then(({ data }) => setPendingUsers(data)).catch(() => setPendingUsers([]));
+      api.get('/users/riders').then(({ data }) => setRiders(data)).catch(() => setRiders([]));
+    }
+  }, [isAdminAuthenticated, role]);
 
   const validateGhanaPhone = (phoneNum) => {
     const cleaned = phoneNum.replace(/[\s-]/g, '');
@@ -211,7 +244,7 @@ export default function App() {
     }
   };
 
-  const handlePlaceOrder = (e) => {
+  const handlePlaceOrder = async (e) => {
     e.preventDefault();
     if (!checkoutData.roomNumber || !checkoutData.name || !checkoutData.phone) {
       alert("Please fill in your name, phone number, and specific room number.");
@@ -223,54 +256,44 @@ export default function App() {
       return;
     }
 
-    const orderId = 'RABI-' + Math.floor(100 + Math.random() * 900);
     const itemName = checkoutData.customItemName ? checkoutData.customItemName : currentOrderProduct.name;
-    
-    const newOrder = {
-      id: orderId,
+    try {
+      const { data: newOrder } = await api.post('/orders', {
       customer: checkoutData.name,
       phone: checkoutData.phone,
       hostel: checkoutData.hostel,
       room: checkoutData.roomNumber,
       items: itemName,
+      productId: Number(checkoutData.selectedProductId),
       quantity: checkoutData.quantity,
-      amount: orderTotal,
-      status: 'Submitted - Pending Admin Approval',
-      progress: 25,
-      eta: 'Awaiting Approval'
-    };
-
-    setOrders([newOrder, ...orders]);
-    setSelectedOrderForTracking(newOrder);
-    setOrderStage('submitted');
-  };
-
-  const handleAdminApproveOrder = (orderId) => {
-    const updatedOrders = orders.map(ord => {
-      if (ord.id === orderId) {
-        return {
-          ...ord,
-          status: 'In Transit (Live Map Active)',
-          progress: 75,
-          eta: '10 mins'
-        };
-      }
-      return ord;
-    });
-
-    setOrders(updatedOrders);
-    const approvedOrd = updatedOrders.find(o => o.id === orderId);
-    if (approvedOrd) {
-      setSelectedOrderForTracking(approvedOrd);
+      deliveryOption: checkoutData.deliveryOption,
+      paymentMethod: checkoutData.paymentMethod,
+      });
+      setOrders([newOrder, ...orders]);
+      setSelectedOrderForTracking(newOrder);
+      setOrderStage('submitted');
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not submit order. Please try again.');
     }
   };
 
-  const handleLookupOrder = (e) => {
+  const handleAdminApproveOrder = async (orderId) => {
+    try {
+      const { data: approvedOrder } = await api.post(`/orders/${orderId}/approve`);
+      setOrders(orders.map(order => order.id === orderId ? approvedOrder : order));
+      setSelectedOrderForTracking(approvedOrder);
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not approve order.');
+    }
+  };
+
+  const handleLookupOrder = async (e) => {
     e.preventDefault();
-    const found = orders.find(o => o.id.toLowerCase() === lookupQuery.trim().toLowerCase() || o.phone === lookupQuery.trim());
-    if (found) {
-      setLookupResult(found);
-    } else {
+    const [orderId, phone] = lookupQuery.trim().split(/\s+/);
+    try {
+      const { data } = await api.get(`/orders/${encodeURIComponent(orderId)}`, { params: { phone: phone || '' } });
+      setLookupResult(data);
+    } catch {
       setLookupResult('not_found');
     }
   };
@@ -293,21 +316,53 @@ export default function App() {
     setContactMsg({ name: '', phone: '', note: '' });
   };
 
-  const handlePasswordChange = (e) => {
-    e.preventDefault();
-    const currentStored = localStorage.getItem('rabi_admin_password');
-    if (currPassInput !== currentStored) {
-      setPassAlert({ show: true, msg: 'Current password does not match.', type: 'red' });
-      return;
-    }
-    localStorage.setItem('rabi_admin_password', newPassInput);
-    setPassAlert({ show: true, msg: 'Password updated successfully!', type: 'emerald' });
-    setCurrPassInput('');
-    setNewPassInput('');
+  const handlePriceChange = (id, newPrice) => {
+    const price = Number(newPrice);
+    setProducts(products.map(p => p.id === id ? { ...p, price } : p));
   };
 
-  const handlePriceChange = (id, newPrice) => {
-    setProducts(products.map(p => p.id === id ? { ...p, price: Number(newPrice) } : p));
+  const persistPrice = async (id, price) => {
+    try {
+      await api.put(`/products/${id}`, { price: Number(price) });
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not save product price.');
+    }
+  };
+
+  const reloadPendingUsers = async () => {
+    const { data } = await api.get('/users/pending');
+    setPendingUsers(data);
+  };
+
+  const updatePendingUser = async (userId, action) => {
+    try {
+      await api.post(`/users/${userId}/${action}`);
+      await reloadPendingUsers();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not update account.');
+    }
+  };
+
+  const assignRider = async (orderId, riderId) => {
+    if (!riderId) return;
+    try {
+      const { data } = await api.post(`/orders/${orderId}/assign-rider`, { rider_id: riderId });
+      setOrders(current => current.map(order => order.id === orderId ? data : order));
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not assign courier.');
+    }
+  };
+
+  const transferAdmin = async (event) => {
+    event.preventDefault();
+    try {
+      await api.post('/users/transfer-admin', { new_admin_email: transferEmail });
+      logout();
+      setActiveView('store');
+      alert(`Admin access transferred to ${transferEmail}. You are now logged out.`);
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not transfer admin access.');
+    }
   };
 
   const handleAddNewProductSubmit = (e) => {
@@ -329,7 +384,9 @@ export default function App() {
       description: newProdDesc || "New arrival item added by Rabi."
     };
 
-    setProducts([newProductItem, ...products]);
+    api.post('/products', newProductItem)
+      .then(({ data }) => setProducts(current => [data, ...current]))
+      .catch(error => alert(error.response?.data?.detail || 'Could not add product.'));
     setNewProdName('');
     setNewProdPrice('');
     setNewProdDesc('');
@@ -375,7 +432,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="h-64 rounded-2xl overflow-hidden bg-rose-50 shadow-inner">
-                <img src={selectedProductModal.mainImage} className="w-full h-full object-cover" alt={selectedProductModal.name} />
+                <img src={optimizeProductImage(selectedProductModal.mainImage)} loading="lazy" decoding="async" className="w-full h-full object-cover" alt={selectedProductModal.name} />
               </div>
               <div className="flex flex-col justify-between space-y-3">
                 <div>
@@ -526,8 +583,13 @@ export default function App() {
               onClick={() => setActiveView('admin')}
               className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'admin' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
             >
-              <i className="fa-solid fa-user-shield"></i> Admin
+              <i className={`fa-solid ${role === 'admin' ? 'fa-user-shield' : 'fa-right-to-bracket'}`}></i> {role === 'admin' ? 'Admin' : 'Login'}
             </button>
+            {user && (
+              <button onClick={() => { logout(); setActiveView('store'); }} className="px-2.5 py-2 text-xs font-bold text-slate-600 flex items-center gap-1" title="Log out">
+                <LogOut size={15} /> Logout
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -598,7 +660,7 @@ export default function App() {
               >
                 <div>
                   <div className="relative h-48 sm:h-56 md:h-60 rounded-2xl overflow-hidden mb-4 bg-rose-50">
-                    <img src={product.mainImage} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" alt={product.name} />
+                    <img src={optimizeProductImage(product.mainImage)} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" alt={product.name} />
                     <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-rose-600">
                       ★ {product.rating}
                     </span>
@@ -730,6 +792,23 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Delivery option</label>
+                      <select value={checkoutData.deliveryOption} onChange={(e) => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
+                        <option value="standard">Standard Accra · GH₵ 30</option>
+                        <option value="express">Express · GH₵ 60</option>
+                        <option value="outside">Outside Accra · GH₵ 80</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Payment</label>
+                      <select value={checkoutData.paymentMethod} onChange={(e) => setCheckoutData({ ...checkoutData, paymentMethod: e.target.value })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
+                        <option>MTN MoMo</option>
+                      </select>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold text-rose-600 uppercase mb-1">Specific Room Number / Location Details *</label>
                     <input 
@@ -767,7 +846,7 @@ export default function App() {
                         <span className="font-mono text-white">GH₵ {orderSubtotal}</span>
                       </div>
                       <div className="flex justify-between text-slate-300">
-                        <span>UCC Hostel Delivery Fee:</span>
+                        <span>Delivery ({checkoutData.deliveryOption}):</span>
                         <span className="font-mono text-white">GH₵ {orderDeliveryFee}</span>
                       </div>
                       <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-sm">
@@ -818,51 +897,8 @@ export default function App() {
       )}
 
       {/* LIVE TRACKING MAP VIEW */}
-      {activeView === 'tracker' && (
-        <main className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/80 backdrop-blur-md p-6 rounded-3xl border border-rose-100 shadow-sm">
-            <div>
-              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                Google Maps Live Telemetry
-              </span>
-              <h2 className="text-2xl md:text-3xl font-serif font-bold text-slate-900 mt-2">UCC Campus Delivery Map</h2>
-              <p className="text-xs text-slate-500 mt-1">Real-time rider location tracking across UCC halls and hostels.</p>
-            </div>
-            <a 
-              href={`https://www.google.com/maps/search/?api=1&query=University+of+Cape+Coast+${encodeURIComponent(activeTrackingOrder?.hostel || 'Casely Hayford Hall')}`}
-              target="_blank"
-              rel="noreferrer"
-              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-bold shadow-lg transition flex items-center gap-2"
-            >
-              <i className="fa-solid fa-map-pin text-rose-500"></i> Open Navigation in Google Maps
-            </a>
-          </div>
-
-          <div className="relative w-full h-[480px] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200">
-            <iframe
-              title="UCC Delivery Map"
-              width="100%"
-              height="100%"
-              style={{ border: 0 }}
-              loading="lazy"
-              allowFullScreen
-              src={`https://maps.google.com/maps?q=University+of+Cape+Coast+Ghana&t=&z=15&ie=UTF8&iwloc=&output=embed`}
-            ></iframe>
-
-            <div className="absolute bottom-4 left-4 right-4 bg-slate-900/90 backdrop-blur-md border border-slate-800 p-4 rounded-2xl flex flex-wrap justify-between items-center text-xs text-slate-300 gap-3 z-20 shadow-xl">
-              <div>
-                <span className="text-rose-400 font-bold">Active Order:</span> <span className="font-mono text-white">{activeTrackingOrder?.id || 'RABI-901'}</span> 
-                <span className="mx-2 text-slate-600">|</span>
-                <span className="text-slate-400">Destination:</span> <strong className="text-white">{activeTrackingOrder?.hostel || 'Casely Hayford Hall'} ({activeTrackingOrder?.room || 'Room 204'})</strong>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-emerald-400 bg-emerald-950/60 px-3 py-1.5 rounded-xl border border-emerald-500/30">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                <span>Live GPS Feed Active</span>
-              </div>
-            </div>
-          </div>
-        </main>
-      )}
+      {activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
+  {activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
 
       {/* LOOKUP VIEW */}
       {activeView === 'lookup' && (
@@ -873,14 +909,14 @@ export default function App() {
             </div>
             <div>
               <h2 className="text-2xl font-serif font-bold text-slate-900">Track Your Order Status</h2>
-              <p className="text-xs text-slate-500 mt-1">Enter your Order ID (e.g. RABI-452) or your Ghana phone number.</p>
+              <p className="text-xs text-slate-500 mt-1">Enter your order ID followed by the phone number used at checkout.</p>
             </div>
 
             <form onSubmit={handleLookupOrder} className="flex gap-2 max-w-md mx-auto">
               <input 
                 type="text"
                 required
-                placeholder="Enter Order ID or Phone Number..."
+                placeholder="RABI-1234ABCD 0241234567"
                 value={lookupQuery}
                 onChange={(e) => setLookupQuery(e.target.value)}
                 className="flex-1 px-4 py-3 rounded-2xl border border-rose-200 text-xs focus:outline-none focus:border-amber-500 font-bold"
@@ -916,6 +952,9 @@ export default function App() {
                 <p>📍 <strong>Hostel Destination:</strong> {lookupResult.hostel} — Room: {lookupResult.room}</p>
                 <p>💰 <strong>Total Amount:</strong> GH₵ {lookupResult.amount}</p>
               </div>
+              <button onClick={() => { setSelectedOrderForTracking(lookupResult); setActiveView('tracker'); }} className="rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white">
+                <i className="fa-solid fa-map-location-dot mr-2"></i>Track delivery
+              </button>
             </div>
           )}
         </main>
@@ -1071,40 +1110,70 @@ export default function App() {
                 <i className="fa-solid fa-user-shield"></i>
               </div>
               <div>
-                <h2 className="text-2xl font-serif font-bold text-slate-900">Admin Portal Login</h2>
-                <p className="text-xs text-slate-500 mt-1">Enter store password to access dashboard controls (Default: admin123).</p>
+                <h2 className="text-2xl font-serif font-bold text-slate-900">{user ? 'Account access' : isSigningUp ? 'Create account' : 'Admin Portal Login'}</h2>
+                <p className="text-xs text-slate-500 mt-1">{user ? `Signed in as ${user.email}` : 'Sign in with your account. New accounts require admin approval.'}</p>
               </div>
 
-              <form onSubmit={(e) => {
+              {user ? (
+                <div className="space-y-4">
+                  <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{role === 'rider' ? 'Courier access is available from the courier dashboard.' : "You need to be an admin or wait for admin's approval."}</p>
+                  <button onClick={() => { logout(); setAuthMessage(''); }} className="w-full rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white">Logout</button>
+                </div>
+              ) : <form onSubmit={async (e) => {
                 e.preventDefault();
-                const storedPass = localStorage.getItem('rabi_admin_password') || 'admin123';
-                if (adminPasswordInput === storedPass) {
-                  setIsAdminAuthenticated(true);
-                  setAuthError(false);
-                } else {
+                setAuthError(false);
+                setAuthMessage('');
+                try {
+                  if (isSigningUp) {
+                    const result = await signup(authEmail, adminPasswordInput, authName);
+                    setAuthMessage(result.message === 'Account created' ? 'Account created. Wait for Rabi to approve access, then sign in.' : result.message);
+                    setIsSigningUp(false);
+                  } else {
+                    const account = await login(authEmail, adminPasswordInput);
+                    setAuthMessage(account.role === 'admin' ? '' : "You need to be an admin or wait for admin's approval.");
+                  }
+                } catch (error) {
+                  setAuthMessage(error.response?.data?.detail || 'Could not authenticate. Check your details and try again.');
                   setAuthError(true);
                 }
               }} className="space-y-4">
-                <input 
+                {isSigningUp && (
+                  <input type="text" required maxLength="100" placeholder="Full name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm" />
+                )}
+                <input type="email" required autoComplete="email" placeholder="Email address" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm" />
+                <input
                   type="password"
                   required
-                  placeholder="Enter admin password..."
+                  minLength={isSigningUp ? 12 : 1}
+                  autoComplete={isSigningUp ? 'new-password' : 'current-password'}
+                  placeholder={isSigningUp ? 'Password (at least 12 characters)' : 'Password'}
                   value={adminPasswordInput}
                   onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm font-bold focus:outline-none focus:border-slate-900 text-center bg-white/70"
+                  className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm"
                 />
                 {authError && (
-                  <p className="text-xs text-rose-600 font-semibold">Incorrect password. Please try again.</p>
+                  <p role="alert" className="text-xs text-rose-600 font-semibold">{authMessage}</p>
                 )}
-                <button 
+                {authMessage && !authError && (
+                  <p role="status" className="text-xs text-amber-700 font-semibold">{authMessage}</p>
+                )}
+                <button
                   type="submit"
                   className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow-lg transition uppercase tracking-wider"
                 >
-                  Authenticate Dashboard
+                  {isSigningUp ? 'Create account' : 'Sign in'}
                 </button>
-              </form>
+                <button type="button" onClick={() => { setIsSigningUp(!isSigningUp); setAuthError(false); setAuthMessage(''); }} className="w-full text-xs font-bold text-rose-700">
+                  {isSigningUp ? 'Already registered? Sign in' : 'Create an account'}
+                </button>
+              </form>}
             </div>
           ) : (
+            <>
+            <div className="mb-5 flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-sm">
+              <span className="text-sm font-semibold text-slate-700">Signed in as {user.email}</span>
+              <button onClick={() => { logout(); setActiveView('store'); }} className="flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700"><LogOut size={15} /> Logout</button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
               
               {/* VERTICAL LEFT SIDEBAR NAV */}
@@ -1167,7 +1236,7 @@ export default function App() {
                 </div>
 
                 <button 
-                  onClick={() => setIsAdminAuthenticated(false)}
+                  onClick={() => { logout(); setActiveView('store'); }}
                   className="w-full py-2.5 bg-rose-100 text-rose-700 rounded-2xl text-xs font-bold hover:bg-rose-200 transition flex items-center justify-center gap-2"
                 >
                   <i className="fa-solid fa-right-from-bracket"></i> Lock Dashboard
@@ -1238,6 +1307,12 @@ export default function App() {
                             </div>
 
                             <div className="flex items-center gap-2 w-full md:w-auto">
+                              {riders.length > 0 && (
+                                <select aria-label={`Assign courier for ${order.id}`} value={order.riderUserId || ''} onChange={(event) => assignRider(order.id, event.target.value)} className="rounded-xl border border-rose-200 bg-white px-3 py-2.5 text-xs">
+                                  <option value="">Assign rider</option>
+                                  {riders.map(rider => <option key={rider.id} value={rider.id}>{rider.name}</option>)}
+                                </select>
+                              )}
                               {order.status.includes('Pending') && (
                                 <button
                                   onClick={() => handleAdminApproveOrder(order.id)}
@@ -1379,7 +1454,7 @@ export default function App() {
                         {products.map(p => (
                           <div key={p.id} className="flex items-center justify-between p-3 rounded-2xl border border-rose-100 bg-white">
                             <div className="flex items-center gap-3">
-                              <img src={p.mainImage} className="w-10 h-10 rounded-xl object-cover" alt="" />
+                              <img src={optimizeProductImage(p.mainImage)} loading="lazy" decoding="async" className="w-10 h-10 rounded-xl object-cover" alt="" />
                               <span className="text-xs font-bold text-slate-800 line-clamp-1">{p.name}</span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1388,6 +1463,7 @@ export default function App() {
                                 type="number"
                                 value={p.price}
                                 onChange={(e) => handlePriceChange(p.id, e.target.value)}
+                                onBlur={(e) => persistPrice(p.id, e.target.value)}
                                 className="w-20 px-2 py-1.5 rounded-lg border border-rose-200 text-xs font-bold text-center"
                               />
                             </div>
@@ -1449,49 +1525,40 @@ export default function App() {
                   </div>
                 )}
 
-                {/* ADMIN TAB: SECURITY */}
+                {/* ADMIN TAB: CLIENT HANDOVER AND ACCOUNT APPROVALS */}
                 {adminTab === 'security' && (
-                  <div className="bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm space-y-6">
-                    <h3 className="font-serif font-bold text-xl text-slate-900">Change Security Password</h3>
-                    <form onSubmit={handlePasswordChange} className="space-y-4">
+                  <div className="space-y-6">
+                    <section className="bg-amber-50 p-6 md:p-8 rounded-2xl border border-amber-200 space-y-4">
                       <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Current Password</label>
-                        <input 
-                          type="password"
-                          required
-                          value={currPassInput}
-                          onChange={(e) => setCurrPassInput(e.target.value)}
-                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
-                        />
+                        <h3 className="font-serif font-bold text-xl text-slate-900">Client handover</h3>
+                        <p className="mt-1 text-xs text-slate-600">Transfer the store owner role to the client. Your account will be downgraded and signed out.</p>
                       </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">New Password</label>
-                        <input 
-                          type="password"
-                          required
-                          value={newPassInput}
-                          onChange={(e) => setNewPassInput(e.target.value)}
-                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
-                        />
-                      </div>
-                      {passAlert.show && (
-                        <div className={`p-3 rounded-xl text-xs font-bold ${passAlert.type === 'red' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-700'}`}>
-                          {passAlert.msg}
+                      <form onSubmit={transferAdmin} className="flex flex-col sm:flex-row gap-3">
+                        <input type="email" required placeholder="Client account email" value={transferEmail} onChange={(e) => setTransferEmail(e.target.value)} className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm" />
+                        <button type="submit" className="rounded-xl bg-amber-700 px-5 py-3 text-xs font-bold text-white">Transfer admin & logout</button>
+                      </form>
+                    </section>
+
+                    <section className="bg-white/80 p-6 md:p-8 rounded-2xl border border-rose-100 space-y-4">
+                      <h3 className="font-serif font-bold text-xl text-slate-900">Pending accounts</h3>
+                      {pendingUsers.length === 0 ? <p className="text-sm text-slate-500">No accounts are waiting for approval.</p> : pendingUsers.map((pendingUser) => (
+                        <div key={pendingUser.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-rose-100 pt-3">
+                          <div><p className="text-sm font-bold text-slate-900">{pendingUser.name}</p><p className="text-xs text-slate-500">{pendingUser.email}</p></div>
+                          <div className="flex gap-2">
+                            <button onClick={() => updatePendingUser(pendingUser.id, 'approve')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white">Approve</button>
+                            <button onClick={() => updatePendingUser(pendingUser.id, 'make-rider')} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white">Approve rider</button>
+                            <button onClick={() => updatePendingUser(pendingUser.id, 'make-admin')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">Make admin</button>
+                          </div>
                         </div>
-                      )}
-                      <button 
-                        type="submit"
-                        className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow transition uppercase tracking-wider"
-                      >
-                        Update Password
-                      </button>
-                    </form>
+                      ))}
+                    </section>
                   </div>
                 )}
 
               </section>
 
             </div>
+            </>
           )}
         </main>
       )}
