@@ -1,579 +1,1507 @@
-import React, { useState, useEffect, useRef } from 'react';
-import L from 'leaflet';
+import React, { useState, useEffect } from 'react';
 
+// Production Initial Catalog
 const INITIAL_PRODUCTS = [
-  { id: 1, name: "Lip Balm", category: "Skincare", price: 25, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1625093742435-6fa192b6fb10?w=500&auto=format&fit=crop&q=60" },
-  { id: 2, name: "Official Wears", category: "Apparel", price: 220, inStock: true, isNew: true, img: "https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?w=500&auto=format&fit=crop&q=60" },
-  { id: 3, name: "Face Mask", category: "Skincare", price: 35, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=500&auto=format&fit=crop&q=60" },
-  { id: 4, name: "Eye Mask", category: "Skincare", price: 30, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1512290900676-26c2a52595b8?w=500&auto=format&fit=crop&q=60" },
-  { id: 5, name: "Lip Mask", category: "Skincare", price: 40, inStock: true, isNew: true, img: "https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=500&auto=format&fit=crop&q=60" },
-  { id: 6, name: "Clay Mask", category: "Skincare", price: 65, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1567928269069-af11f638f7b5?w=500&auto=format&fit=crop&q=60" },
-  { id: 7, name: "Headbands", category: "Hair", price: 20, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1584297091622-af8e5cb1e97d?w=500&auto=format&fit=crop&q=60" },
-  { id: 8, name: "Slippers", category: "Footwear", price: 75, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1603808033192-082d6919d3e1?w=500&auto=format&fit=crop&q=60" },
-  { id: 9, name: "Sandals", category: "Footwear", price: 110, inStock: true, isNew: true, img: "https://images.unsplash.com/photo-1562273138-f46be4ebdf33?w=500&auto=format&fit=crop&q=60" },
-  { id: 10, name: "Down Shoe", category: "Footwear", price: 150, inStock: true, isNew: true, img: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=500&auto=format&fit=crop&q=60" },
-  { id: 11, name: "Scrunchies", category: "Hair", price: 15, inStock: true, isNew: false, img: "https://images.unsplash.com/photo-1606760227091-3dd870d97f1d?w=500&auto=format&fit=crop&q=60" }
+  {
+    id: 1,
+    name: "Chic Floral Summer Mini Dress",
+    category: "Dresses",
+    price: 180,
+    stock: 12,
+    rating: 4.8,
+    mainImage: "https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?auto=format&fit=crop&w=600&q=80",
+    description: "Breathable, high-quality chiffon floral dress designed for everyday elegance on UCC campus."
+  },
+  {
+    id: 2,
+    name: "Satin Evening Elegance Gown",
+    category: "Dresses",
+    price: 290,
+    stock: 5,
+    rating: 4.9,
+    mainImage: "https://images.unsplash.com/photo-1566174053879-31528523f8ae?auto=format&fit=crop&w=600&q=80",
+    description: "Premium silk satin gown ideal for awards nights, formal dinners, and special hall events."
+  },
+  {
+    id: 3,
+    name: "Luxury Designer Gold Clasp Tote",
+    category: "Bags",
+    price: 220,
+    stock: 8,
+    rating: 4.7,
+    mainImage: "https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=600&q=80",
+    description: "Spacious faux leather tote bag with gold-tone hardware. Perfect for lectures and laptops."
+  },
+  {
+    id: 4,
+    name: "Strappy Stiletto Party Heels",
+    category: "Footwear",
+    price: 210,
+    stock: 10,
+    rating: 4.6,
+    mainImage: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=80",
+    description: "Sleek and comfortable 4-inch strap heels to complete your stylish outfits."
+  }
 ];
 
-// Slideshow images using your exact custom uploads
-const SLIDESHOW_IMAGES = [
-  "https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?w=1000&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=1000&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=1000&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=1000&auto=format&fit=crop&q=80"
+const ALL_CATEGORIES = [
+  "All",
+  "Dresses",
+  "Bags",
+  "Footwear",
+  "Lip balm",
+  "Face mask",
+  "Eye mask",
+  "Lip mask",
+  "Clay mask",
+  "Headbands",
+  "Slippers",
+  "Sandals",
+  "Down shoe",
+  "Scrunchies",
+  "Official dresses"
 ];
-
-const UCC_LOCATIONS = {
-  "Casely Hayford Hall": [5.1165, -1.2885],
-  "Valco Hall": [5.1140, -1.2860],
-  "Kwame Nkrumah Hall": [5.1180, -1.2890],
-  "Oguaa Hall": [5.1120, -1.2830],
-  "Adehye Hall": [5.1135, -1.2845],
-  "Amamoma Hostel Area": [5.1220, -1.2910],
-  "Apewosika Area": [5.1090, -1.2810],
-  "Kwaprow Area": [5.1250, -1.2930],
-  "Science Market": [5.1155, -1.2870]
-};
-
-const STORE_HUB_COORDS = [5.1150, -1.2850];
 
 export default function App() {
-  const [showFlyer, setShowFlyer] = useState(true);
-  const [activeTab, setActiveTab] = useState('shop');
-  const [products, setProducts] = useState(() => JSON.parse(localStorage.getItem('rabis_products') || JSON.stringify(INITIAL_PRODUCTS)));
-  const [cart, setCart] = useState([]);
-  const [isCartOpen, setIsCartOpen] = useState(false);
-  const [orders, setOrders] = useState(() => JSON.parse(localStorage.getItem('rabis_orders') || '[]'));
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [currentSlide, setCurrentSlide] = useState(0);
+  // Navigation State
+  const [activeView, setActiveView] = useState('store'); // 'store', 'tracker', 'lookup', 'about', 'contact', 'admin'
+  const [adminTab, setAdminTab] = useState('overview'); // 'overview', 'approvals', 'messages', 'catalog', 'contact', 'security'
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [authError, setAuthError] = useState(false);
 
-  // Admin & Socials state
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [adminPin, setAdminPin] = useState(() => localStorage.getItem('rabis_admin_pin') || '1234');
-  const [enteredPin, setEnteredPin] = useState('');
-  const [showAccessDenied, setShowAccessDenied] = useState(false);
-  const [activeInvoice, setActiveInvoice] = useState(null);
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedProductModal, setSelectedProductModal] = useState(null);
 
-  const [socials, setSocials] = useState(() => JSON.parse(localStorage.getItem('rabis_socials') || JSON.stringify({
-    phone: '+233 24 123 4567',
-    whatsapp: '233241234567',
-    instagram: 'RabiChicUCC',
-    tiktok: 'RabiChicUCC',
-    facebook: 'RabiChicFashionHub',
-    snapchat: 'RabiChicSnap'
-  })));
+  // Products State
+  const [products, setProducts] = useState(() => {
+    const saved = localStorage.getItem('rabi_products');
+    return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+  });
 
-  // New admin password update state
-  const [newPinInput, setNewPinInput] = useState('');
+  // New Product Form State
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdCat, setNewProdCat] = useState('Dresses');
+  const [newProdPrice, setNewProdPrice] = useState('');
+  const [newProdDesc, setNewProdDesc] = useState('');
+  const [newProdImages, setNewProdImages] = useState([]);
 
-  // Checkout form state
-  const [custName, setCustName] = useState('');
-  const [custPhone, setCustPhone] = useState('');
-  const [custHostel, setCustHostel] = useState('Casely Hayford Hall');
-  const [custRoom, setCustRoom] = useState('');
+  // Admin Profile State
+  const [adminProfile, setAdminProfile] = useState(() => {
+    const saved = localStorage.getItem('rabi_admin_profile');
+    return saved ? JSON.parse(saved) : {
+      name: 'Rabi',
+      title: 'Store Owner & Fashion Designer',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      bio: "Passionate about bringing affordable, chic, and high-quality fashion trends directly to students across University of Cape Coast campus."
+    };
+  });
 
-  // Map state
-  const mapRef = useRef(null);
-  const mapInstance = useRef(null);
-  const polylineRef = useRef(null);
-  const riderMarkerRef = useRef(null);
-  const [telemetry, setTelemetry] = useState({ id: 'None', dest: 'UCC Campus', eta: '-- mins', dist: '-- km', status: 'STANDBY' });
+  // Admin Contact Information State
+  const [adminContact, setAdminContact] = useState(() => {
+    const saved = localStorage.getItem('rabi_admin_contact');
+    return saved ? JSON.parse(saved) : {
+      phone: '+233240000000',
+      whatsapp: '233240000000',
+      email: 'contact@rabischic.com',
+      location: 'University of Cape Coast (UCC), Cape Coast, Ghana'
+    };
+  });
 
-  // 2s Flyer Splash
+  // Hero Banner Slideshow
+  const [slides, setSlides] = useState(() => {
+    const saved = localStorage.getItem('rabi_slides');
+    return saved ? JSON.parse(saved) : [
+      { id: 1, url: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1200&q=80', title: 'New UCC Campus Arrival' },
+      { id: 2, url: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=80', title: "Rabi's Exclusive Chic Collection" }
+    ];
+  });
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+
+  // Orders & Messages State
+  const [orders, setOrders] = useState(() => {
+    const saved = localStorage.getItem('rabi_orders');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [selectedOrderForTracking, setSelectedOrderForTracking] = useState(null);
+  const [messages, setMessages] = useState(() => {
+    const saved = localStorage.getItem('rabi_messages');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Customer Order Lookup State
+  const [lookupQuery, setLookupQuery] = useState('');
+  const [lookupResult, setLookupResult] = useState(null);
+
+  // Contact Form State
+  const [contactMsg, setContactMsg] = useState({ name: '', phone: '', note: '' });
+  const [contactSubmitted, setContactSubmitted] = useState(false);
+
+  // Checkout Form State
+  const [checkoutData, setCheckoutData] = useState({
+    name: '',
+    phone: '',
+    hostel: 'Casely Hayford Hall',
+    roomNumber: '',
+    selectedProductId: 1,
+    customItemName: '',
+    quantity: 1
+  });
+
+  const [orderStage, setOrderStage] = useState('idle');
+  const [showCallModal, setShowCallModal] = useState(false);
+
+  // Security Settings State
+  const [currPassInput, setCurrPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+  const [passAlert, setPassAlert] = useState({ show: false, msg: '', type: '' });
+
+  // Local Storage Sync
   useEffect(() => {
-    const timer = setTimeout(() => setShowFlyer(false), 2000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Hero Slideshow Timer
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % SLIDESHOW_IMAGES.length);
-    }, 3500);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('rabis_products', JSON.stringify(products));
+    localStorage.setItem('rabi_products', JSON.stringify(products));
   }, [products]);
 
   useEffect(() => {
-    localStorage.setItem('rabis_orders', JSON.stringify(orders));
+    localStorage.setItem('rabi_slides', JSON.stringify(slides));
+  }, [slides]);
+
+  useEffect(() => {
+    localStorage.setItem('rabi_orders', JSON.stringify(orders));
   }, [orders]);
 
   useEffect(() => {
-    localStorage.setItem('rabis_socials', JSON.stringify(socials));
-  }, [socials]);
+    localStorage.setItem('rabi_messages', JSON.stringify(messages));
+  }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem('rabis_admin_pin', adminPin);
-  }, [adminPin]);
+    localStorage.setItem('rabi_admin_profile', JSON.stringify(adminProfile));
+  }, [adminProfile]);
 
-  // Leaflet Map Init
   useEffect(() => {
-    if (activeTab === 'track' && mapRef.current && !mapInstance.current) {
-      mapInstance.current = L.map(mapRef.current).setView(STORE_HUB_COORDS, 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap | Rabi\'s Chic Fashion Hub'
-      }).addTo(mapInstance.current);
+    localStorage.setItem('rabi_admin_contact', JSON.stringify(adminContact));
+  }, [adminContact]);
 
-      L.marker(STORE_HUB_COORDS).addTo(mapInstance.current)
-        .bindPopup('<b>Rabi\'s Chic Fashion Hub HQ</b><br>Main UCC Dispatch')
-        .openPopup();
-    }
-  }, [activeTab]);
+  if (!localStorage.getItem('rabi_admin_password')) {
+    localStorage.setItem('rabi_admin_password', 'admin123');
+  }
 
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (enteredPin === adminPin) {
-      setIsAdminLoggedIn(true);
-      setShowAccessDenied(false);
-      setEnteredPin('');
-    } else {
-      setShowAccessDenied(true);
-      setEnteredPin('');
-    }
+  const currentOrderProduct = products.find(p => p.id === Number(checkoutData.selectedProductId)) || products[0];
+  const orderSubtotal = (currentOrderProduct?.price || 0) * checkoutData.quantity;
+  const orderDeliveryFee = 10;
+  const orderTotal = orderSubtotal + orderDeliveryFee;
+
+  const validateGhanaPhone = (phoneNum) => {
+    const cleaned = phoneNum.replace(/[\s-]/g, '');
+    const ghanaRegex = /^(?:\+233|233|0)[23579]\d{8}$/;
+    return ghanaRegex.test(cleaned);
   };
 
-  const handleAddToCart = (product) => {
-    if (!product.inStock) return;
-    setCart((prev) => {
-      const exists = prev.find((p) => p.id === product.id);
-      if (exists) {
-        return prev.map((p) => p.id === product.id ? { ...p, qty: p.qty + 1 } : p);
+  const handleSearchKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const match = products.find(p => p.name.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+      if (match) {
+        setSelectedProductModal(match);
+      } else if (filteredProducts.length > 0) {
+        setSelectedProductModal(filteredProducts[0]);
       }
-      return [...prev, { ...product, qty: 1 }];
-    });
-    setIsCartOpen(true);
+    }
   };
 
-  const handleCheckout = () => {
-    if (cart.length === 0) return alert('Your cart is empty!');
-    if (!custName || !custPhone) return alert('Please enter your Name and Phone Number');
+  const handlePlaceOrder = (e) => {
+    e.preventDefault();
+    if (!checkoutData.roomNumber || !checkoutData.name || !checkoutData.phone) {
+      alert("Please fill in your name, phone number, and specific room number.");
+      return;
+    }
 
-    const orderId = '#RABI-' + Math.random().toString(36).substring(2, 7).toUpperCase();
-    const coords = UCC_LOCATIONS[custHostel] || STORE_HUB_COORDS;
+    if (!validateGhanaPhone(checkoutData.phone)) {
+      alert("Invalid Ghana phone number! Please enter a valid number starting with 0 or +233 (e.g. 0241234567).");
+      return;
+    }
 
+    const orderId = 'RABI-' + Math.floor(100 + Math.random() * 900);
+    const itemName = checkoutData.customItemName ? checkoutData.customItemName : currentOrderProduct.name;
+    
     const newOrder = {
       id: orderId,
-      date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      customer: { name: custName, phone: custPhone, hostel: custHostel, room: custRoom, coords },
-      items: [...cart],
-      status: 'Out for Delivery',
-      total: cart.reduce((acc, i) => acc + (i.price * i.qty), 0)
+      customer: checkoutData.name,
+      phone: checkoutData.phone,
+      hostel: checkoutData.hostel,
+      room: checkoutData.roomNumber,
+      items: itemName,
+      quantity: checkoutData.quantity,
+      amount: orderTotal,
+      status: 'Submitted - Pending Admin Approval',
+      progress: 25,
+      eta: 'Awaiting Approval'
     };
 
     setOrders([newOrder, ...orders]);
-    setCart([]);
-    setIsCartOpen(false);
-    alert(`🎉 Order Placed Successfully!\nOrder ID: ${orderId}\nTrack live delivery on the Campus Radar Map!`);
-    setActiveTab('track');
-    loadOrderOnMap(newOrder);
+    setSelectedOrderForTracking(newOrder);
+    setOrderStage('submitted');
   };
 
-  const loadOrderOnMap = (order) => {
-    if (!mapInstance.current) return;
-    if (polylineRef.current) mapInstance.current.removeLayer(polylineRef.current);
-    if (riderMarkerRef.current) mapInstance.current.removeLayer(riderMarkerRef.current);
+  const handleAdminApproveOrder = (orderId) => {
+    const updatedOrders = orders.map(ord => {
+      if (ord.id === orderId) {
+        return {
+          ...ord,
+          status: 'In Transit (Live Map Active)',
+          progress: 75,
+          eta: '10 mins'
+        };
+      }
+      return ord;
+    });
 
-    const destCoords = order.customer.coords;
-    L.marker(destCoords).addTo(mapInstance.current)
-      .bindPopup(`<b>${order.customer.name}</b><br>${order.customer.hostel} (${order.customer.room})`)
-      .openPopup();
+    setOrders(updatedOrders);
+    const approvedOrd = updatedOrders.find(o => o.id === orderId);
+    if (approvedOrd) {
+      setSelectedOrderForTracking(approvedOrd);
+    }
+  };
 
-    polylineRef.current = L.polyline([STORE_HUB_COORDS, destCoords], { color: '#e11d48', weight: 4, dashArray: '8, 8' }).addTo(mapInstance.current);
-    mapInstance.current.fitBounds(polylineRef.current.getBounds(), { padding: [50, 50] });
+  const handleLookupOrder = (e) => {
+    e.preventDefault();
+    const found = orders.find(o => o.id.toLowerCase() === lookupQuery.trim().toLowerCase() || o.phone === lookupQuery.trim());
+    if (found) {
+      setLookupResult(found);
+    } else {
+      setLookupResult('not_found');
+    }
+  };
 
-    setTelemetry({
-      id: order.id,
-      dest: order.customer.hostel,
-      eta: '6 mins',
-      dist: '1.2 km',
-      status: order.status.toUpperCase()
+  const handleContactSubmit = (e) => {
+    e.preventDefault();
+    if (!contactMsg.name || !contactMsg.phone || !contactMsg.note) {
+      alert("Please complete all contact fields.");
+      return;
+    }
+    const newMsg = {
+      id: 'INQ-' + Date.now(),
+      sender: contactMsg.name,
+      phone: contactMsg.phone,
+      text: contactMsg.note,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setMessages([newMsg, ...messages]);
+    setContactSubmitted(true);
+    setContactMsg({ name: '', phone: '', note: '' });
+  };
+
+  const handlePasswordChange = (e) => {
+    e.preventDefault();
+    const currentStored = localStorage.getItem('rabi_admin_password');
+    if (currPassInput !== currentStored) {
+      setPassAlert({ show: true, msg: 'Current password does not match.', type: 'red' });
+      return;
+    }
+    localStorage.setItem('rabi_admin_password', newPassInput);
+    setPassAlert({ show: true, msg: 'Password updated successfully!', type: 'emerald' });
+    setCurrPassInput('');
+    setNewPassInput('');
+  };
+
+  const handlePriceChange = (id, newPrice) => {
+    setProducts(products.map(p => p.id === id ? { ...p, price: Number(newPrice) } : p));
+  };
+
+  const handleAddNewProductSubmit = (e) => {
+    e.preventDefault();
+    if (!newProdName || !newProdPrice) {
+      alert("Please provide at least a product name and price.");
+      return;
+    }
+
+    const newProductItem = {
+      id: Date.now(),
+      name: newProdName,
+      category: newProdCat,
+      price: Number(newProdPrice),
+      stock: 15,
+      rating: 5.0,
+      mainImage: newProdImages.length > 0 ? newProdImages[0] : "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=600&q=80",
+      images: newProdImages,
+      description: newProdDesc || "New arrival item added by Rabi."
+    };
+
+    setProducts([newProductItem, ...products]);
+    setNewProdName('');
+    setNewProdPrice('');
+    setNewProdDesc('');
+    setNewProdImages([]);
+    alert("New catalog item uploaded successfully!");
+  };
+
+  const handleMultiImageUpload = (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        setNewProdImages(prev => [...prev, evt.target.result]);
+      };
+      reader.readAsDataURL(file);
     });
   };
 
-  const filteredProducts = products.filter((p) => {
-    if (selectedCategory === 'all') return true;
-    if (selectedCategory === 'new') return p.isNew;
-    return p.category === selectedCategory;
+  const filteredProducts = products.filter(p => {
+    const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          p.description.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
   });
 
+  const activeTrackingOrder = selectedOrderForTracking || orders[0];
+
   return (
-    <div className="min-h-screen pb-16">
-      {/* 2-SECOND INITIAL FLYER SPLASH */}
-      {showFlyer && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full text-center shadow-2xl animate-bounce">
-            <h2 className="font-serif text-2xl font-bold text-rose-700 mb-2">Rabi's Chic Fashion Hub</h2>
-            <p className="text-xs text-slate-500 uppercase font-bold tracking-widest mb-4">UCC Campus Express</p>
-            <img src={SLIDESHOW_IMAGES[0]} className="w-full h-64 object-cover rounded-2xl mb-4 border border-rose-100" />
-            <p className="text-xs text-rose-600 font-bold">✨ Welcome to Beauty & Comfort! Loading Store...</p>
+    <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
+
+      {/* PRODUCT DETAILS MODAL */}
+      {selectedProductModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-6 md:p-8 max-w-xl w-full shadow-2xl border border-white/60 space-y-6 relative overflow-hidden">
+            <button 
+              onClick={() => setSelectedProductModal(null)}
+              className="absolute top-4 right-4 bg-slate-100 hover:bg-slate-200 text-slate-600 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition"
+            >
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="h-64 rounded-2xl overflow-hidden bg-rose-50 shadow-inner">
+                <img src={selectedProductModal.mainImage} className="w-full h-full object-cover" alt={selectedProductModal.name} />
+              </div>
+              <div className="flex flex-col justify-between space-y-3">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600 bg-rose-100 px-3 py-1 rounded-full">
+                    {selectedProductModal.category}
+                  </span>
+                  <h3 className="text-xl font-serif font-bold text-slate-900 mt-2">{selectedProductModal.name}</h3>
+                  <p className="text-xs text-slate-600 mt-2 leading-relaxed">{selectedProductModal.description}</p>
+                </div>
+
+                <div className="space-y-3 pt-3 border-t border-rose-100">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-400 font-bold uppercase">Price</span>
+                    <span className="text-2xl font-black text-slate-900">GH₵ {selectedProductModal.price}</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setCheckoutData({ ...checkoutData, selectedProductId: selectedProductModal.id, customItemName: selectedProductModal.name });
+                      setSelectedProductModal(null);
+                      setActiveView('store');
+                      setTimeout(() => {
+                        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                      }, 200);
+                    }}
+                    className="w-full py-3.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-bold text-xs rounded-2xl shadow-lg shadow-rose-500/30 transition flex items-center justify-center gap-2"
+                  >
+                    <i className="fa-solid fa-cart-shopping"></i> Order This Item Now
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* HEADER NAVBAR */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-rose-100 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div onClick={() => setActiveTab('shop')} className="flex items-center gap-2 cursor-pointer">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-500 flex items-center justify-center text-white shadow-md">
-              <i className="fa-solid fa-crown text-lg"></i>
+      {/* CALL ADMIN MODAL SELECTOR */}
+      {showCallModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 md:p-8 max-w-sm w-full shadow-2xl border border-rose-100 text-center space-y-6">
+            <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto text-2xl shadow-inner">
+              <i className="fa-solid fa-headset"></i>
             </div>
             <div>
-              <span className="font-serif text-xl font-bold text-rose-700">Rabi's Chic</span>
-              <span className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">Fashion Hub UCC</span>
+              <h3 className="font-serif font-bold text-xl text-slate-900">Contact Rabi's Chic Admin</h3>
+              <p className="text-xs text-slate-500 mt-1">Choose how you want to reach out for clarification on your order.</p>
+            </div>
+
+            <div className="space-y-3">
+              <a 
+                href={`https://wa.me/${adminContact.whatsapp}?text=Hello%20Rabi,%20I%20need%20clarification%20on%20my%20UCC%20hostel%20order.`}
+                target="_blank" 
+                rel="noreferrer"
+                onClick={() => setShowCallModal(false)}
+                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2"
+              >
+                <i className="fa-brands fa-whatsapp text-lg"></i> Chat on WhatsApp
+              </a>
+
+              <a 
+                href={`tel:${adminContact.phone}`}
+                onClick={() => setShowCallModal(false)}
+                className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow-lg transition flex items-center justify-center gap-2"
+              >
+                <i className="fa-solid fa-phone-volume text-sm"></i> Make Voice Call ({adminContact.phone})
+              </a>
+            </div>
+
+            <button 
+              onClick={() => setShowCallModal(false)}
+              className="text-xs text-slate-400 hover:text-slate-600 font-semibold"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* NAVIGATION BAR */}
+      <header className="bg-white/80 backdrop-blur-md border-b border-rose-100 sticky top-0 z-40 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveView('store')}>
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center font-serif font-bold text-xl shadow-md">
+              R
+            </div>
+            <div>
+              <h1 className="font-serif font-bold text-lg md:text-xl text-slate-900 tracking-wide leading-tight">Rabi's Chic</h1>
+              <p className="text-[9px] md:text-[10px] text-rose-500 uppercase tracking-widest font-semibold">UCC Campus Store</p>
             </div>
           </div>
 
-          <nav className="hidden md:flex items-center gap-2 font-medium text-sm text-slate-600">
-            <button onClick={() => setActiveTab('shop')} className={`px-4 py-2 rounded-full ${activeTab === 'shop' ? 'bg-rose-50 text-rose-600 font-bold' : ''}`}>Shop Catalog</button>
-            <button onClick={() => setActiveTab('track')} className={`px-4 py-2 rounded-full ${activeTab === 'track' ? 'bg-rose-50 text-rose-600 font-bold' : ''}`}>Track Radar Map</button>
-            <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-full ${activeTab === 'history' ? 'bg-rose-50 text-rose-600 font-bold' : ''}`}>My Orders</button>
-            <button onClick={() => setActiveTab('admin')} className="px-4 py-2 rounded-full bg-slate-900 text-white font-bold ml-2">
-              <i className="fa-solid fa-user-shield text-xs mr-1"></i> Admin Portal
-            </button>
-          </nav>
+          {/* SEARCH BAR */}
+          <div className="w-full sm:w-auto sm:flex-1 max-w-xs md:max-w-md order-3 sm:order-2">
+            <div className="relative">
+              <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+              <input 
+                type="text"
+                placeholder="Search items & press Enter to view details..."
+                value={searchQuery}
+                onKeyDown={handleSearchKeyPress}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 rounded-2xl bg-rose-50/60 border border-rose-200 text-xs text-slate-800 focus:outline-none focus:border-rose-500 focus:bg-white transition font-medium"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600">
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              )}
+            </div>
+          </div>
 
-          <button onClick={() => setIsCartOpen(true)} className="relative p-2.5 rounded-full bg-rose-100/70 text-rose-700">
-            <i className="fa-solid fa-bag-shopping text-lg"></i>
-            <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] font-bold flex items-center justify-center">
-              {cart.reduce((acc, i) => acc + i.qty, 0)}
-            </span>
-          </button>
+          <div className="flex items-center gap-1.5 md:gap-2 order-2 sm:order-3 overflow-x-auto max-w-full pb-1 sm:pb-0">
+            <button 
+              onClick={() => setActiveView('store')}
+              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-rose-50 text-rose-700 hover:bg-rose-100'}`}
+            >
+              <i className="fa-solid fa-bag-shopping"></i> Store
+            </button>
+
+            <button 
+              onClick={() => setActiveView('tracker')}
+              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'tracker' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+            >
+              <i className="fa-solid fa-map-location-dot"></i> Live Map
+            </button>
+
+            <button 
+              onClick={() => setActiveView('lookup')}
+              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'lookup' ? 'bg-amber-600 text-white shadow-md shadow-amber-200' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+            >
+              <i className="fa-solid fa-magnifying-glass-chart"></i> Lookup
+            </button>
+
+            <button 
+              onClick={() => setActiveView('about')}
+              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'about' ? 'bg-pink-600 text-white shadow-md' : 'bg-pink-50 text-pink-700 hover:bg-pink-100'}`}
+            >
+              <i className="fa-solid fa-heart"></i> About
+            </button>
+
+            <button 
+              onClick={() => setActiveView('contact')}
+              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'contact' ? 'bg-purple-600 text-white shadow-md' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}
+            >
+              <i className="fa-solid fa-address-book"></i> Contact
+            </button>
+
+            <button 
+              onClick={() => setActiveView('admin')}
+              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'admin' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+            >
+              <i className="fa-solid fa-user-shield"></i> Admin
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* MAIN CONTAINER */}
-      <main className="max-w-7xl mx-auto px-4 mt-6">
-        {/* SHOP TAB */}
-        {activeTab === 'shop' && (
-          <section className="space-y-6">
-            {/* HERO SLIDESHOW */}
-            <div className="relative h-80 sm:h-96 rounded-3xl overflow-hidden shadow-2xl border-2 border-rose-100">
-              {SLIDESHOW_IMAGES.map((img, idx) => (
-                <div key={idx} className={`absolute inset-0 transition-opacity duration-1000 ${idx === currentSlide ? 'opacity-100' : 'opacity-0'}`}>
-                  <img src={img} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-slate-950/40 to-transparent flex items-center p-8 sm:p-12 text-white">
-                    <div className="max-w-lg">
-                      <span className="px-3 py-1 bg-rose-600 rounded-full text-xs font-bold uppercase tracking-widest mb-3 inline-block">✨ Style That Speaks For You</span>
-                      <h1 className="font-serif text-3xl sm:text-5xl font-bold mb-3">Rabi's Chic Fashion Hub</h1>
-                      <p className="text-rose-100 text-sm mb-6">Comfortable slippers, elegant dresses, official wears, skincare & gift packages delivered to your hostel!</p>
-                      <a href={`https://wa.me/${socials.whatsapp}`} target="_blank" rel="noreferrer" className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-bold text-sm inline-flex items-center gap-2 shadow-lg">
-                        <i className="fa-brands fa-whatsapp text-lg"></i> Chat on WhatsApp ({socials.phone})
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+      {/* STORE VIEW */}
+      {activeView === 'store' && (
+        <main className="max-w-7xl mx-auto px-4 py-6 space-y-8 md:space-y-10">
 
-            {/* CATEGORIES */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
-              {['all', 'new', 'Skincare', 'Apparel', 'Footwear', 'Hair'].map((cat) => (
-                <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-5 py-2.5 rounded-2xl font-bold text-sm whitespace-nowrap ${selectedCategory === cat ? 'bg-rose-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>
-                  {cat === 'all' ? 'All Items' : cat === 'new' ? '🔥 New Arrivals' : cat}
+          {/* HERO BANNER SLIDESHOW */}
+          <div className="relative w-full h-64 sm:h-80 md:h-96 rounded-3xl overflow-hidden shadow-xl bg-slate-900">
+            {slides.length > 0 && (
+              <>
+                <img 
+                  src={slides[currentSlideIndex]?.url} 
+                  className="w-full h-full object-cover transition-all duration-700 opacity-90"
+                  alt="Banner" 
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex flex-col justify-end p-5 md:p-8 text-white">
+                  <span className="bg-rose-500 text-white text-[9px] md:text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider w-max mb-2">
+                    UCC Campus Exclusive
+                  </span>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight">{slides[currentSlideIndex]?.title}</h2>
+                  <p className="text-xs md:text-sm text-rose-100 mt-1">Fast UCC hostel delivery with real Google Maps live GPS tracking!</p>
+                </div>
+              </>
+            )}
+            <button 
+              onClick={() => setCurrentSlideIndex((currentSlideIndex - 1 + slides.length) % slides.length)}
+              className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center transition"
+            >
+              <i className="fa-solid fa-chevron-left text-xs md:text-base"></i>
+            </button>
+            <button 
+              onClick={() => setCurrentSlideIndex((currentSlideIndex + 1) % slides.length)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center transition"
+            >
+              <i className="fa-solid fa-chevron-right text-xs md:text-base"></i>
+            </button>
+          </div>
+
+          {/* CATEGORIES */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">Browse Collections</h3>
+              <span className="text-xs text-rose-500 font-semibold">{filteredProducts.length} Items</span>
+            </div>
+            
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+              {ALL_CATEGORIES.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-2xl text-xs font-bold transition flex-shrink-0 ${selectedCategory === cat ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'bg-white text-slate-600 border border-rose-100 hover:bg-rose-50'}`}
+                >
+                  {cat === 'All' ? '✨ All Products' : cat}
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* PRODUCT GRID */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {filteredProducts.map((p) => (
-                <div key={p.id} className="bg-white rounded-3xl p-4 border border-rose-100 shadow-md flex flex-col justify-between">
-                  <div>
-                    <div className="relative rounded-2xl overflow-hidden h-48 mb-3">
-                      <img src={p.img} className={`w-full h-full object-cover ${!p.inStock ? 'grayscale opacity-60' : ''}`} />
-                      <span className="absolute top-3 left-3 bg-white/90 px-3 py-1 rounded-full text-[11px] font-bold text-rose-700">{p.category}</span>
-                      {p.isNew && <span className="absolute top-3 right-3 bg-amber-500 text-white px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase">NEW</span>}
-                      {!p.inStock && <span className="absolute inset-0 bg-slate-900/60 flex items-center justify-center text-white font-extrabold text-sm uppercase">Out of Stock</span>}
-                    </div>
-                    <h3 className="font-bold text-slate-800 text-base mb-1">{p.name}</h3>
-                    <p className="text-rose-600 font-extrabold text-lg mb-4">GH₵ {p.price.toFixed(2)}</p>
+          {/* PRODUCTS GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+            {filteredProducts.map(product => (
+              <div 
+                key={product.id} 
+                onClick={() => setSelectedProductModal(product)}
+                className="bg-white rounded-3xl p-4 border border-rose-100 shadow-sm hover:shadow-xl transition group flex flex-col justify-between cursor-pointer"
+              >
+                <div>
+                  <div className="relative h-48 sm:h-56 md:h-60 rounded-2xl overflow-hidden mb-4 bg-rose-50">
+                    <img src={product.mainImage} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" alt={product.name} />
+                    <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-rose-600">
+                      ★ {product.rating}
+                    </span>
                   </div>
-                  <button onClick={() => handleAddToCart(p)} disabled={!p.inStock} className={`w-full py-3 rounded-xl font-bold transition ${p.inStock ? 'bg-rose-100 text-rose-700 hover:bg-rose-600 hover:text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
-                    {p.inStock ? 'Add to Bag' : 'Out of Stock'}
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg">
+                    {product.category}
+                  </span>
+                  <h4 className="font-bold text-slate-900 mt-2 line-clamp-1">{product.name}</h4>
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">{product.description}</p>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-rose-50 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block">Price</span>
+                    <div className="text-base md:text-lg font-black text-slate-900">GH₵ {product.price}</div>
+                  </div>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCheckoutData({ ...checkoutData, selectedProductId: product.id, customItemName: product.name });
+                      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                    }}
+                    className="bg-rose-500 hover:bg-rose-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-rose-200"
+                  >
+                    Order Now
                   </button>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              </div>
+            ))}
+          </div>
 
-        {/* TRACK RADAR MAP */}
-        {activeTab === 'track' && (
-          <section className="space-y-6">
-            <div className="bg-white p-6 rounded-3xl border border-rose-100 shadow-lg flex justify-between items-center">
+          {/* ORDER & INVOICE FORM */}
+          <div className="bg-white p-5 md:p-8 rounded-3xl border border-rose-100 shadow-sm max-w-4xl mx-auto space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <h2 className="font-serif text-2xl font-bold">UCC Campus Live Delivery Radar</h2>
-                <p className="text-slate-500 text-sm">Interactive GPS telemetry map centered on University of Cape Coast campus.</p>
+                <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">Place UCC Hostel Order & Calculate Invoice</h3>
+                <p className="text-xs text-slate-500 mt-1">Select or type your item, enter your valid Ghana phone number, and specific room number.</p>
               </div>
+              <button 
+                type="button"
+                onClick={() => setShowCallModal(true)}
+                className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 shadow transition"
+              >
+                <i className="fa-solid fa-phone-volume"></i> Call Admin
+              </button>
             </div>
 
-            <div className="relative rounded-3xl overflow-hidden border-2 border-rose-200 shadow-2xl h-[500px]">
-              <div ref={mapRef} className="w-full h-full z-10"></div>
-              <div className="absolute top-4 left-4 z-20 bg-slate-900/90 text-white p-4 rounded-2xl text-xs w-60 shadow-2xl">
-                <div className="font-bold text-rose-400 mb-2 border-b border-slate-700 pb-1">GPS Telemetry</div>
-                <div className="space-y-1 font-mono">
-                  <div>Ref: <span className="text-white font-bold">{telemetry.id}</span></div>
-                  <div>Dest: <span className="text-white">{telemetry.dest}</span></div>
-                  <div>Status: <span className="text-amber-400 font-bold">{telemetry.status}</span></div>
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* MY ORDERS */}
-        {activeTab === 'history' && (
-          <section className="max-w-3xl mx-auto space-y-4">
-            <h2 className="font-serif text-2xl font-bold">Order History</h2>
-            {orders.length === 0 ? (
-              <div className="bg-white p-12 text-center rounded-3xl text-slate-400">No orders placed yet.</div>
-            ) : (
-              orders.map((o) => (
-                <div key={o.id} className="bg-white p-6 rounded-3xl border border-rose-100 shadow-md flex justify-between items-center">
+            {orderStage === 'idle' && (
+              <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                <div className="space-y-4">
                   <div>
-                    <div className="font-bold text-slate-900">{o.id}</div>
-                    <div className="text-xs text-slate-400">{o.date} • {o.customer.hostel}</div>
-                  </div>
-                  <button onClick={() => setActiveInvoice(o)} className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl">View Invoice</button>
-                </div>
-              ))
-            )}
-          </section>
-        )}
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Select Catalog Product Or Type Below</label>
+                    <select 
+                      value={checkoutData.selectedProductId}
+                      onChange={(e) => {
+                        const prodId = e.target.value;
+                        const p = products.find(x => x.id === Number(prodId));
+                        setCheckoutData({ ...checkoutData, selectedProductId: prodId, customItemName: p ? p.name : '' });
+                      }}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500 mb-2"
+                    >
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} — GH₵ {p.price}</option>
+                      ))}
+                    </select>
 
-        {/* ADMIN PORTAL */}
-        {activeTab === 'admin' && (
-          <section className="max-w-4xl mx-auto space-y-6">
-            {!isAdminLoggedIn ? (
-              <div className="bg-white p-8 rounded-3xl border border-slate-200 max-w-md mx-auto shadow-xl text-center">
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center mx-auto mb-4 text-xl">
-                  <i className="fa-solid fa-lock"></i>
-                </div>
-                <h2 className="font-serif text-2xl font-bold mb-1">Admin Access Only</h2>
-                <p className="text-xs text-slate-500 mb-6">Enter master PIN to unlock inventory & social settings.</p>
-                <form onSubmit={handleAdminLogin} className="space-y-4">
-                  <input type="password" placeholder="Enter PIN (Default: 1234)" value={enteredPin} onChange={(e) => setEnteredPin(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 text-center font-mono font-bold outline-none" />
-                  {showAccessDenied && <p className="text-xs text-rose-600 font-bold">❌ Access Denied: Incorrect PIN.</p>}
-                  <button type="submit" className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm">Unlock Admin Dashboard</button>
-                </form>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="bg-slate-900 text-white p-6 rounded-3xl flex justify-between items-center">
+                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1 mt-3">Or Type Exact Item Name You Want</label>
+                    <input 
+                      type="text"
+                      placeholder="e.g. Lip Mask, Scrunchies, Official Clothes..."
+                      value={checkoutData.customItemName}
+                      onChange={(e) => setCheckoutData({ ...checkoutData, customItemName: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs focus:outline-none focus:border-rose-500 font-semibold"
+                    />
+                  </div>
+
                   <div>
-                    <h2 className="font-serif text-2xl font-bold text-rose-400">Admin Control Panel</h2>
-                    <p className="text-xs text-slate-400">Manage pricing, stock, contact info, and social links.</p>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Quantity</label>
+                    <input 
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={checkoutData.quantity}
+                      onChange={(e) => setCheckoutData({ ...checkoutData, quantity: Math.max(1, Number(e.target.value)) })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm font-bold focus:outline-none focus:border-rose-500"
+                    />
                   </div>
-                  <button onClick={() => setIsAdminLoggedIn(false)} className="px-4 py-2 bg-rose-900 text-rose-200 text-xs font-bold rounded-xl">Lock Session</button>
-                </div>
 
-                {/* SOCIAL MEDIA & CONTACT SETTINGS */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-                  <h3 className="font-bold text-lg text-slate-800">🌐 Update Contact & Social Media Links</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                    <div>
-                      <label className="block font-bold text-slate-600 mb-1">Phone Number</label>
-                      <input type="text" value={socials.phone} onChange={(e) => setSocials({...socials, phone: e.target.value})} className="w-full p-2.5 border rounded-xl" />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-600 mb-1">WhatsApp Number (e.g. 233241234567)</label>
-                      <input type="text" value={socials.whatsapp} onChange={(e) => setSocials({...socials, whatsapp: e.target.value})} className="w-full p-2.5 border rounded-xl" />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-600 mb-1">Instagram Handle</label>
-                      <input type="text" value={socials.instagram} onChange={(e) => setSocials({...socials, instagram: e.target.value})} className="w-full p-2.5 border rounded-xl" />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-600 mb-1">TikTok Handle</label>
-                      <input type="text" value={socials.tiktok} onChange={(e) => setSocials({...socials, tiktok: e.target.value})} className="w-full p-2.5 border rounded-xl" />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-600 mb-1">Facebook Name / Link</label>
-                      <input type="text" value={socials.facebook} onChange={(e) => setSocials({...socials, facebook: e.target.value})} className="w-full p-2.5 border rounded-xl" />
-                    </div>
-                    <div>
-                      <label className="block font-bold text-slate-600 mb-1">Snapchat Handle</label>
-                      <input type="text" value={socials.snapchat} onChange={(e) => setSocials({...socials, snapchat: e.target.value})} className="w-full p-2.5 border rounded-xl" />
-                    </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Your Full Name</label>
+                    <input 
+                      type="text"
+                      required
+                      placeholder="e.g. Abena Osei"
+                      value={checkoutData.name}
+                      onChange={(e) => setCheckoutData({ ...checkoutData, name: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm focus:outline-none focus:border-rose-500"
+                    />
                   </div>
-                  <div className="pt-2">
-                    <button onClick={() => alert('✅ Social links & contact information updated successfully!')} className="px-6 py-2.5 bg-rose-600 text-white font-bold rounded-xl text-xs">Save Contact Changes</button>
-                  </div>
-                </div>
 
-                {/* CHANGE ADMIN PASSWORD */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-                  <h3 className="font-bold text-lg text-slate-800">🔐 Change Admin Password / PIN</h3>
-                  <div className="flex gap-4 items-center">
-                    <input type="password" placeholder="Enter New 4-digit PIN" value={newPinInput} onChange={(e) => setNewPinInput(e.target.value)} className="w-60 p-2.5 border rounded-xl text-sm font-mono font-bold" />
-                    <button onClick={() => {
-                      if (newPinInput.length < 4) return alert('PIN must be at least 4 characters.');
-                      setAdminPin(newPinInput);
-                      setNewPinInput('');
-                      alert('🔒 Admin PIN successfully updated!');
-                    }} className="px-6 py-2.5 bg-slate-900 text-white font-bold rounded-xl text-xs">Update PIN</button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Ghana Phone Number *</label>
+                      <input 
+                        type="tel"
+                        required
+                        placeholder="024XXXXXXX or +233..."
+                        value={checkoutData.phone}
+                        onChange={(e) => setCheckoutData({ ...checkoutData, phone: e.target.value })}
+                        className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm focus:outline-none focus:border-rose-500 font-bold"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">Ghana format (+233 / 0...)</span>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Delivery Hostel</label>
+                      <select 
+                        value={checkoutData.hostel}
+                        onChange={(e) => setCheckoutData({ ...checkoutData, hostel: e.target.value })}
+                        className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500"
+                      >
+                        <option>Casely Hayford Hall</option>
+                        <option>Valco Hall</option>
+                        <option>Oguaa Hall</option>
+                        <option>Adehye Hall</option>
+                        <option>Superannuation</option>
+                        <option>KNH Hostel</option>
+                      </select>
+                    </div>
                   </div>
-                </div>
 
-                {/* INVENTORY TABLE */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                  <h3 className="font-bold text-lg mb-4">📦 Inventory & Pricing</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b text-slate-400 uppercase">
-                          <th className="pb-2">Name</th>
-                          <th className="pb-2">Price (GH₵)</th>
-                          <th className="pb-2">Stock</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {products.map((p) => (
-                          <tr key={p.id}>
-                            <td className="py-3 font-bold">{p.name}</td>
-                            <td className="py-3">
-                              <input type="number" value={p.price} onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setProducts(products.map((x) => x.id === p.id ? { ...x, price: val } : x));
-                              }} className="w-20 px-2 py-1 border rounded" />
-                            </td>
-                            <td className="py-3">
-                              <button onClick={() => setProducts(products.map((x) => x.id === p.id ? { ...x, inStock: !x.inStock } : x))} className={`px-3 py-1 rounded-full text-[10px] font-bold ${p.inStock ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                                {p.inStock ? 'In Stock' : 'Out of Stock'}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div>
+                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1">Specific Room Number / Location Details *</label>
+                    <input 
+                      type="text"
+                      required
+                      placeholder="e.g. Room 204, Block B, Floor 2"
+                      value={checkoutData.roomNumber}
+                      onChange={(e) => setCheckoutData({ ...checkoutData, roomNumber: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border-2 border-rose-300 text-xs font-bold focus:outline-none focus:border-rose-500"
+                    />
                   </div>
                 </div>
-              </div>
-            )}
-          </section>
-        )}
-      </main>
 
-      {/* SHOPPING CART SIDEBAR */}
-      {isCartOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex justify-end">
-          <div className="bg-white w-full max-w-md h-full p-6 flex flex-col justify-between shadow-2xl">
-            <div>
-              <div className="flex justify-between items-center mb-6 border-b pb-4">
-                <h3 className="font-serif text-xl font-bold">Your Shopping Bag</h3>
-                <button onClick={() => setIsCartOpen(false)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold">✕</button>
-              </div>
-
-              {cart.length === 0 ? (
-                <div className="text-center py-20 text-slate-400">Your bag is empty.</div>
-              ) : (
-                <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2">
-                  {cart.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between bg-rose-50/50 p-3 rounded-2xl">
+                <div className="bg-slate-900 text-white p-5 md:p-6 rounded-3xl shadow-xl flex flex-col justify-between space-y-4">
+                  <div>
+                    <div className="flex justify-between items-center pb-3 border-b border-slate-800">
                       <div>
-                        <div className="font-bold text-sm">{item.name}</div>
-                        <div className="text-xs text-rose-600 font-bold">GH₵ {item.price.toFixed(2)} × {item.qty}</div>
+                        <span className="text-[9px] text-rose-400 font-mono font-bold uppercase tracking-wider block">
+                          Rabi's Store Official Invoice
+                        </span>
+                        <h4 className="text-base md:text-lg font-bold">Checkout Summary</h4>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => setCart(cart.map((i) => i.id === item.id ? { ...i, qty: Math.max(1, i.qty - 1) } : i))} className="w-6 h-6 bg-white rounded-md shadow text-xs font-bold">-</button>
-                        <span className="text-xs font-bold">{item.qty}</span>
-                        <button onClick={() => setCart(cart.map((i) => i.id === item.id ? { ...i, qty: i.qty + 1 } : i))} className="w-6 h-6 bg-white rounded-md shadow text-xs font-bold">+</button>
+                      <div className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xs">
+                        <i className="fa-solid fa-receipt"></i>
                       </div>
                     </div>
-                  ))}
+
+                    <div className="my-4 space-y-3 text-xs">
+                      <div className="flex justify-between text-slate-300 gap-2">
+                        <span>Item ({checkoutData.quantity}x):</span>
+                        <span className="font-bold text-white text-right">{checkoutData.customItemName || currentOrderProduct.name}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-300">
+                        <span>Subtotal:</span>
+                        <span className="font-mono text-white">GH₵ {orderSubtotal}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-300">
+                        <span>UCC Hostel Delivery Fee:</span>
+                        <span className="font-mono text-white">GH₵ {orderDeliveryFee}</span>
+                      </div>
+                      <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-sm">
+                        <span className="font-bold text-rose-400">Total Amount:</span>
+                        <span className="text-lg font-black font-mono text-white">GH₵ {orderTotal}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit"
+                    className="w-full py-4 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-bold text-xs rounded-2xl shadow-lg shadow-rose-600/30 transition flex items-center justify-center gap-2 uppercase tracking-wider"
+                  >
+                    <i className="fa-solid fa-paper-plane"></i> Submit Order & Notify Admin
+                  </button>
                 </div>
+
+              </form>
+            )}
+
+            {orderStage !== 'idle' && (
+              <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-3xl text-center space-y-4">
+                <div className="w-14 h-14 bg-emerald-600 text-white rounded-2xl flex items-center justify-center mx-auto text-xl shadow-lg">
+                  <i className="fa-solid fa-check"></i>
+                </div>
+                <div>
+                  <h4 className="font-serif font-bold text-lg text-emerald-900">Order Submitted Successfully!</h4>
+                  <p className="text-xs text-emerald-700 mt-1">Your order has been sent to Rabi's admin dashboard. Once approved, the live Google Maps map will track your delivery.</p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3 pt-2">
+                  <button 
+                    onClick={() => setActiveView('tracker')}
+                    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow transition"
+                  >
+                    <i className="fa-solid fa-map-location-dot mr-1.5"></i> Open Live Map
+                  </button>
+                  <button 
+                    onClick={() => setOrderStage('idle')}
+                    className="px-5 py-3 bg-white hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-2xl border border-emerald-300 transition"
+                  >
+                    Place Another Order
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+      )}
+
+      {/* LIVE TRACKING MAP VIEW */}
+      {activeView === 'tracker' && (
+        <main className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/80 backdrop-blur-md p-6 rounded-3xl border border-rose-100 shadow-sm">
+            <div>
+              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                Google Maps Live Telemetry
+              </span>
+              <h2 className="text-2xl md:text-3xl font-serif font-bold text-slate-900 mt-2">UCC Campus Delivery Map</h2>
+              <p className="text-xs text-slate-500 mt-1">Real-time rider location tracking across UCC halls and hostels.</p>
+            </div>
+            <a 
+              href={`https://www.google.com/maps/search/?api=1&query=University+of+Cape+Coast+${encodeURIComponent(activeTrackingOrder?.hostel || 'Casely Hayford Hall')}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-bold shadow-lg transition flex items-center gap-2"
+            >
+              <i className="fa-solid fa-map-pin text-rose-500"></i> Open Navigation in Google Maps
+            </a>
+          </div>
+
+          <div className="relative w-full h-[480px] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200">
+            <iframe
+              title="UCC Delivery Map"
+              width="100%"
+              height="100%"
+              style={{ border: 0 }}
+              loading="lazy"
+              allowFullScreen
+              src={`https://maps.google.com/maps?q=University+of+Cape+Coast+Ghana&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+            ></iframe>
+
+            <div className="absolute bottom-4 left-4 right-4 bg-slate-900/90 backdrop-blur-md border border-slate-800 p-4 rounded-2xl flex flex-wrap justify-between items-center text-xs text-slate-300 gap-3 z-20 shadow-xl">
+              <div>
+                <span className="text-rose-400 font-bold">Active Order:</span> <span className="font-mono text-white">{activeTrackingOrder?.id || 'RABI-901'}</span> 
+                <span className="mx-2 text-slate-600">|</span>
+                <span className="text-slate-400">Destination:</span> <strong className="text-white">{activeTrackingOrder?.hostel || 'Casely Hayford Hall'} ({activeTrackingOrder?.room || 'Room 204'})</strong>
+              </div>
+              <div className="flex items-center gap-2 font-mono text-emerald-400 bg-emerald-950/60 px-3 py-1.5 rounded-xl border border-emerald-500/30">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                <span>Live GPS Feed Active</span>
+              </div>
+            </div>
+          </div>
+        </main>
+      )}
+
+      {/* LOOKUP VIEW */}
+      {activeView === 'lookup' && (
+        <main className="max-w-2xl mx-auto px-4 py-12 space-y-6">
+          <div className="bg-white p-8 rounded-3xl border border-rose-100 shadow-sm text-center space-y-4">
+            <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center mx-auto text-xl">
+              <i className="fa-solid fa-magnifying-glass-chart"></i>
+            </div>
+            <div>
+              <h2 className="text-2xl font-serif font-bold text-slate-900">Track Your Order Status</h2>
+              <p className="text-xs text-slate-500 mt-1">Enter your Order ID (e.g. RABI-452) or your Ghana phone number.</p>
+            </div>
+
+            <form onSubmit={handleLookupOrder} className="flex gap-2 max-w-md mx-auto">
+              <input 
+                type="text"
+                required
+                placeholder="Enter Order ID or Phone Number..."
+                value={lookupQuery}
+                onChange={(e) => setLookupQuery(e.target.value)}
+                className="flex-1 px-4 py-3 rounded-2xl border border-rose-200 text-xs focus:outline-none focus:border-amber-500 font-bold"
+              />
+              <button 
+                type="submit"
+                className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-2xl shadow transition"
+              >
+                Search
+              </button>
+            </form>
+          </div>
+
+          {lookupResult === 'not_found' && (
+            <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl text-center text-xs text-rose-700 font-semibold">
+              No order found matching "{lookupQuery}". Please check your Order ID or phone number.
+            </div>
+          )}
+
+          {lookupResult && lookupResult !== 'not_found' && (
+            <div className="bg-white p-6 rounded-3xl border border-rose-100 shadow-md space-y-4">
+              <div className="flex justify-between items-center pb-3 border-b border-rose-50">
+                <div>
+                  <span className="font-mono text-xs font-bold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-lg">{lookupResult.id}</span>
+                  <h3 className="text-lg font-bold text-slate-900 mt-1">{lookupResult.customer}</h3>
+                </div>
+                <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full">
+                  {lookupResult.status}
+                </span>
+              </div>
+              <div className="space-y-2 text-xs text-slate-600">
+                <p>📦 <strong>Items:</strong> {lookupResult.items} (Qty: {lookupResult.quantity})</p>
+                <p>📍 <strong>Hostel Destination:</strong> {lookupResult.hostel} — Room: {lookupResult.room}</p>
+                <p>💰 <strong>Total Amount:</strong> GH₵ {lookupResult.amount}</p>
+              </div>
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* ABOUT VIEW */}
+      {activeView === 'about' && (
+        <main className="max-w-4xl mx-auto px-4 py-12 space-y-10">
+          <div className="bg-white p-8 md:p-12 rounded-3xl border border-rose-100 shadow-sm text-center space-y-4">
+            <img src={adminProfile.avatar} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-rose-200 shadow-md" alt="Rabi" />
+            <h2 className="text-3xl font-serif font-bold text-slate-900">About Rabi's Chic Store</h2>
+            <p className="text-xs md:text-sm text-rose-600 font-semibold max-w-lg mx-auto">{adminProfile.title}</p>
+            <p className="text-xs md:text-sm text-slate-600 max-w-2xl mx-auto leading-relaxed mt-2">{adminProfile.bio}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-3xl border border-rose-100 shadow-sm text-center space-y-3">
+              <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                <i className="fa-solid fa-bolt"></i>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">Fast Hostel Delivery</h3>
+              <p className="text-xs text-slate-500">Direct-to-room delivery across all UCC halls including Casely Hayford, Valco, and Oguaa.</p>
+            </div>
+            <div className="bg-white p-6 rounded-3xl border border-rose-100 shadow-sm text-center space-y-3">
+              <div className="w-12 h-12 bg-pink-100 text-pink-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                <i className="fa-solid fa-gem"></i>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">Curated Excellence</h3>
+              <p className="text-xs text-slate-500">Every dress, handbag, and cosmetic product is carefully selected for quality and style.</p>
+            </div>
+            <div className="bg-white p-6 rounded-3xl border border-rose-100 shadow-sm text-center space-y-3">
+              <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                <i className="fa-solid fa-hand-holding-dollar"></i>
+              </div>
+              <h3 className="font-bold text-slate-900 text-sm">Student-Friendly Prices</h3>
+              <p className="text-xs text-slate-500">Elegance and quality tailored to suit student budgets right here on campus.</p>
+            </div>
+          </div>
+        </main>
+      )}
+
+      {/* CONTACT VIEW */}
+      {activeView === 'contact' && (
+        <main className="max-w-4xl mx-auto px-4 py-12 space-y-8">
+          <div className="text-center space-y-2">
+            <h2 className="text-3xl font-serif font-bold text-slate-900">Get in Touch with Rabi</h2>
+            <p className="text-xs text-slate-500">Have questions about an item, delivery times, or custom requests? We'd love to help!</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-rose-100 shadow-sm space-y-6">
+              <h3 className="font-serif font-bold text-xl text-slate-900">Contact Information</h3>
+              <div className="space-y-4 text-xs">
+                <div className="flex items-center gap-4 p-3 bg-rose-50/50 rounded-2xl">
+                  <div className="w-10 h-10 rounded-xl bg-rose-500 text-white flex items-center justify-center text-base">
+                    <i className="fa-solid fa-phone"></i>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">Phone Support</span>
+                    <a href={`tel:${adminContact.phone}`} className="font-bold text-slate-900 text-sm">{adminContact.phone}</a>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 p-3 bg-emerald-50/50 rounded-2xl">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-base">
+                    <i className="fa-brands fa-whatsapp"></i>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">WhatsApp Support</span>
+                    <a href={`https://wa.me/${adminContact.whatsapp}`} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Chat on WhatsApp</a>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl">
+                  <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center text-base">
+                    <i className="fa-solid fa-location-dot"></i>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">Location</span>
+                    <span className="font-bold text-slate-900">{adminContact.location}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-rose-50">
+                <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider mb-2">UCC Delivery Coverage</h4>
+                <p className="text-xs text-slate-500 leading-relaxed">Casely Hayford, Valco, Oguaa, Adehye, Superannuation, and KNH Hostels.</p>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-rose-100 shadow-sm space-y-4">
+              <h3 className="font-serif font-bold text-xl text-slate-900">Send Direct Message</h3>
+              {contactSubmitted ? (
+                <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl text-center space-y-3">
+                  <div className="w-12 h-12 bg-emerald-600 text-white rounded-full flex items-center justify-center mx-auto text-lg">
+                    <i className="fa-solid fa-check"></i>
+                  </div>
+                  <h4 className="font-bold text-emerald-900 text-sm">Message Sent!</h4>
+                  <p className="text-xs text-emerald-700">Rabi has received your message in the admin panel and will respond shortly.</p>
+                  <button onClick={() => setContactSubmitted(false)} className="text-xs font-bold text-emerald-800 underline mt-2">Send another note</button>
+                </div>
+              ) : (
+                <form onSubmit={handleContactSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Your Name</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="Your full name..."
+                      value={contactMsg.name}
+                      onChange={(e) => setContactMsg({ ...contactMsg, name: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Ghana Phone Number</label>
+                    <input 
+                      type="tel" 
+                      required
+                      placeholder="024XXXXXXX"
+                      value={contactMsg.phone}
+                      onChange={(e) => setContactMsg({ ...contactMsg, phone: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Message / Note</label>
+                    <textarea 
+                      required
+                      rows="4"
+                      placeholder="How can we help you?"
+                      value={contactMsg.note}
+                      onChange={(e) => setContactMsg({ ...contactMsg, note: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs focus:outline-none focus:border-rose-500"
+                    ></textarea>
+                  </div>
+                  <button type="submit" className="w-full py-3.5 bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs rounded-2xl shadow transition">
+                    Send Inquiry Note
+                  </button>
+                </form>
               )}
             </div>
+          </div>
+        </main>
+      )}
 
-            {cart.length > 0 && (
-              <div className="space-y-4 pt-4 border-t">
-                <div className="space-y-2 text-xs">
-                  <input type="text" placeholder="Your Full Name *" value={custName} onChange={(e) => setCustName(e.target.value)} className="w-full p-2.5 border rounded-xl" />
-                  <input type="text" placeholder="Phone Number (WhatsApp) *" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} className="w-full p-2.5 border rounded-xl" />
-                  <select value={custHostel} onChange={(e) => setCustHostel(e.target.value)} className="w-full p-2.5 border rounded-xl bg-white">
-                    {Object.keys(UCC_LOCATIONS).map((h) => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                  <input type="text" placeholder="Room Number / Block (e.g. Room B204)" value={custRoom} onChange={(e) => setCustRoom(e.target.value)} className="w-full p-2.5 border rounded-xl" />
-                </div>
-
-                <div className="flex justify-between font-bold text-base">
-                  <span>Total:</span>
-                  <span className="text-rose-600">GH₵ {cart.reduce((acc, i) => acc + (i.price * i.qty), 0).toFixed(2)}</span>
-                </div>
-
-                <button onClick={handleCheckout} className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl shadow-lg text-sm">
-                  Place Hostel Order & Track GPS
-                </button>
+      {/* ADMIN VIEW WITH VERTICAL LEFT SIDEBAR & GLASSMORPHISM THEME */}
+      {activeView === 'admin' && (
+        <main className="max-w-7xl mx-auto px-4 py-8">
+          {!isAdminAuthenticated ? (
+            <div className="bg-white/80 backdrop-blur-xl p-8 md:p-12 rounded-3xl border border-white/60 shadow-xl max-w-md mx-auto text-center space-y-6">
+              <div className="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center mx-auto text-2xl shadow">
+                <i className="fa-solid fa-user-shield"></i>
               </div>
-            )}
-          </div>
-        </div>
+              <div>
+                <h2 className="text-2xl font-serif font-bold text-slate-900">Admin Portal Login</h2>
+                <p className="text-xs text-slate-500 mt-1">Enter store password to access dashboard controls (Default: admin123).</p>
+              </div>
+
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const storedPass = localStorage.getItem('rabi_admin_password') || 'admin123';
+                if (adminPasswordInput === storedPass) {
+                  setIsAdminAuthenticated(true);
+                  setAuthError(false);
+                } else {
+                  setAuthError(true);
+                }
+              }} className="space-y-4">
+                <input 
+                  type="password"
+                  required
+                  placeholder="Enter admin password..."
+                  value={adminPasswordInput}
+                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm font-bold focus:outline-none focus:border-slate-900 text-center bg-white/70"
+                />
+                {authError && (
+                  <p className="text-xs text-rose-600 font-semibold">Incorrect password. Please try again.</p>
+                )}
+                <button 
+                  type="submit"
+                  className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow-lg transition uppercase tracking-wider"
+                >
+                  Authenticate Dashboard
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+              
+              {/* VERTICAL LEFT SIDEBAR NAV */}
+              <aside className="md:col-span-1 bg-white/70 backdrop-blur-md p-4 rounded-3xl border border-white/80 shadow-sm space-y-6">
+                <div className="flex items-center gap-3 p-2">
+                  <img src={adminProfile.avatar} className="w-12 h-12 rounded-2xl object-cover border-2 border-rose-200 shadow" alt="Admin" />
+                  <div>
+                    <h3 className="font-serif font-bold text-sm text-slate-900">{adminProfile.name}</h3>
+                    <p className="text-[10px] text-rose-500 font-semibold">{adminProfile.title}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <button 
+                    onClick={() => setAdminTab('overview')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center gap-3 ${adminTab === 'overview' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <i className="fa-solid fa-chart-pie text-sm"></i> Overview
+                  </button>
+                  <button 
+                    onClick={() => setAdminTab('approvals')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center justify-between ${adminTab === 'approvals' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <span className="flex items-center gap-3">
+                      <i className="fa-solid fa-circle-check text-sm"></i> Approvals
+                    </span>
+                    {orders.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-extrabold">{orders.length}</span>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setAdminTab('messages')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center justify-between ${adminTab === 'messages' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <span className="flex items-center gap-3">
+                      <i className="fa-solid fa-envelope text-sm"></i> Messages
+                    </span>
+                    {messages.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white text-[9px] font-extrabold">{messages.length}</span>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setAdminTab('catalog')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center gap-3 ${adminTab === 'catalog' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <i className="fa-solid fa-boxes-stacked text-sm"></i> Catalog
+                  </button>
+                  <button 
+                    onClick={() => setAdminTab('contact')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center gap-3 ${adminTab === 'contact' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <i className="fa-solid fa-sliders text-sm"></i> Contact Settings
+                  </button>
+                  <button 
+                    onClick={() => setAdminTab('security')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center gap-3 ${adminTab === 'security' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <i className="fa-solid fa-lock text-sm"></i> Security
+                  </button>
+                </div>
+
+                <button 
+                  onClick={() => setIsAdminAuthenticated(false)}
+                  className="w-full py-2.5 bg-rose-100 text-rose-700 rounded-2xl text-xs font-bold hover:bg-rose-200 transition flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-right-from-bracket"></i> Lock Dashboard
+                </button>
+              </aside>
+
+              {/* MAIN CONTENT AREA */}
+              <section className="md:col-span-3">
+                {/* ADMIN TAB: OVERVIEW */}
+                {adminTab === 'overview' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/80 shadow-sm space-y-2">
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Products</span>
+                      <div className="text-3xl font-black text-slate-900">{products.length}</div>
+                      <p className="text-[11px] text-rose-500 font-medium">Active items in UCC store</p>
+                    </div>
+                    <div className="bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/80 shadow-sm space-y-2">
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Customer Orders</span>
+                      <div className="text-3xl font-black text-slate-900">{orders.length}</div>
+                      <p className="text-[11px] text-emerald-600 font-medium">Hostel delivery requests</p>
+                    </div>
+                    <div className="bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/80 shadow-sm space-y-2">
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Incoming Messages</span>
+                      <div className="text-3xl font-black text-slate-900">{messages.length}</div>
+                      <p className="text-[11px] text-amber-600 font-medium">Contact form inquiries</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ADMIN TAB: ORDER APPROVALS */}
+                {adminTab === 'approvals' && (
+                  <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="font-serif font-bold text-xl text-slate-900">Order Approvals & Dispatch</h3>
+                        <p className="text-xs text-slate-500 mt-1">Review incoming customer hostel orders and approve to start live GPS delivery map.</p>
+                      </div>
+                      <span className="bg-rose-100 text-rose-700 text-xs font-bold px-3 py-1.5 rounded-xl">
+                        {orders.length} Total Orders
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      {orders.length === 0 ? (
+                        <div className="bg-rose-50/50 p-8 rounded-3xl text-center text-slate-400 border border-rose-100 text-xs font-medium">
+                          No customer orders placed yet.
+                        </div>
+                      ) : (
+                        orders.map((order) => (
+                          <div key={order.id} className="bg-white/90 backdrop-blur-md p-5 rounded-3xl border border-rose-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-rose-300 transition">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-xs bg-rose-50 text-rose-600 px-2.5 py-1 rounded-lg">{order.id}</span>
+                                <span className="text-xs font-bold text-slate-900">{order.customer}</span>
+                                <span className="text-xs text-slate-400">({order.phone})</span>
+                              </div>
+                              <p className="text-xs text-slate-700 font-medium">
+                                📦 <strong className="text-slate-900">{order.items}</strong> (Qty: {order.quantity}) — Total: <strong className="text-rose-600">GH₵ {order.amount}</strong>
+                              </p>
+                              <p className="text-[11px] text-slate-500">
+                                📍 Hostel Location: <strong className="text-slate-800">{order.hostel} — Room: {order.room}</strong>
+                              </p>
+                              <div className="inline-block mt-1">
+                                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${order.status.includes('Approved') || order.status.includes('Transit') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
+                                  Status: {order.status}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full md:w-auto">
+                              {order.status.includes('Pending') && (
+                                <button
+                                  onClick={() => handleAdminApproveOrder(order.id)}
+                                  className="w-full md:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-2xl shadow-md transition flex items-center justify-center gap-1.5"
+                                >
+                                  <i className="fa-solid fa-circle-check"></i> Approve & Start Delivery
+                                </button>
+                              )}
+                              <a
+                                href={`https://wa.me/${order.phone.replace(/[^0-9]/g, '')}?text=Hello%20${order.customer},%20regarding%20your%20order%20${order.id}%20at%20UCC...`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-2xl transition flex items-center justify-center gap-1"
+                              >
+                                <i className="fa-brands fa-whatsapp text-sm"></i> Chat
+                              </a>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ADMIN TAB: INCOMING CONTACT MESSAGES */}
+                {adminTab === 'messages' && (
+                  <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h3 className="font-serif font-bold text-xl text-slate-900">Customer Contact Messages</h3>
+                        <p className="text-xs text-slate-500 mt-1">Direct inquiries submitted by students from the Contact page.</p>
+                      </div>
+                      <span className="bg-purple-100 text-purple-700 text-xs font-bold px-3 py-1.5 rounded-xl">
+                        {messages.length} Messages
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      {messages.length === 0 ? (
+                        <div className="bg-purple-50/50 p-8 rounded-3xl text-center text-slate-400 border border-purple-100 text-xs font-medium">
+                          No direct contact messages received yet.
+                        </div>
+                      ) : (
+                        messages.map((msg) => (
+                          <div key={msg.id} className="bg-white/90 backdrop-blur-md p-5 rounded-3xl border border-purple-100 shadow-sm space-y-3">
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-lg">{msg.id}</span>
+                                <h4 className="font-bold text-xs text-slate-900">{msg.sender}</h4>
+                                <span className="text-[11px] text-slate-400">({msg.phone})</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400">{msg.time}</span>
+                            </div>
+
+                            <p className="text-xs text-slate-700 bg-purple-50/40 p-3 rounded-2xl border border-purple-50 leading-relaxed font-medium">
+                              "{msg.text}"
+                            </p>
+
+                            <div className="flex justify-end gap-2">
+                              <a
+                                href={`https://wa.me/${msg.phone.replace(/[^0-9]/g, '')}?text=Hello%20${msg.sender},%20responding%20to%20your%20inquiry...`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+                              >
+                                <i className="fa-brands fa-whatsapp"></i> Reply on WhatsApp
+                              </a>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ADMIN TAB: CATALOG MANAGEMENT */}
+                {adminTab === 'catalog' && (
+                  <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm">
+                    <h3 className="font-serif font-bold text-xl text-slate-900">Manage Store Catalog & Prices</h3>
+                    
+                    <form onSubmit={handleAddNewProductSubmit} className="bg-white/80 p-6 rounded-3xl border border-rose-100 space-y-4">
+                      <h4 className="font-bold text-xs text-rose-700 uppercase tracking-wider">Add New Item to Catalog</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <input 
+                          type="text"
+                          required
+                          placeholder="Product Name..."
+                          value={newProdName}
+                          onChange={(e) => setNewProdName(e.target.value)}
+                          className="px-4 py-2.5 rounded-xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                        <input 
+                          type="number"
+                          required
+                          placeholder="Price (GH₵)..."
+                          value={newProdPrice}
+                          onChange={(e) => setNewProdPrice(e.target.value)}
+                          className="px-4 py-2.5 rounded-xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                        <select 
+                          value={newProdCat}
+                          onChange={(e) => setNewProdCat(e.target.value)}
+                          className="px-4 py-2.5 rounded-xl border border-rose-200 text-xs font-bold bg-white"
+                        >
+                          {ALL_CATEGORIES.filter(c => c !== 'All').map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input 
+                          type="text"
+                          placeholder="Description..."
+                          value={newProdDesc}
+                          onChange={(e) => setNewProdDesc(e.target.value)}
+                          className="px-4 py-2.5 rounded-xl border border-rose-200 text-xs bg-white"
+                        />
+                        <input 
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={handleMultiImageUpload}
+                          className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-rose-500 file:text-white hover:file:bg-rose-600"
+                        />
+                      </div>
+
+                      <button 
+                        type="submit"
+                        className="px-5 py-2.5 bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs rounded-xl shadow transition"
+                      >
+                        Upload New Product
+                      </button>
+                    </form>
+
+                    <div className="space-y-3 pt-2">
+                      <h4 className="font-bold text-xs text-slate-700 uppercase tracking-wider">Update Product Prices</h4>
+                      <div className="grid grid-cols-1 gap-3">
+                        {products.map(p => (
+                          <div key={p.id} className="flex items-center justify-between p-3 rounded-2xl border border-rose-100 bg-white">
+                            <div className="flex items-center gap-3">
+                              <img src={p.mainImage} className="w-10 h-10 rounded-xl object-cover" alt="" />
+                              <span className="text-xs font-bold text-slate-800 line-clamp-1">{p.name}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-400 font-bold">GH₵</span>
+                              <input 
+                                type="number"
+                                value={p.price}
+                                onChange={(e) => handlePriceChange(p.id, e.target.value)}
+                                className="w-20 px-2 py-1.5 rounded-lg border border-rose-200 text-xs font-bold text-center"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ADMIN TAB: CONTACT SETTINGS */}
+                {adminTab === 'contact' && (
+                  <div className="bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm space-y-6">
+                    <h3 className="font-serif font-bold text-xl text-slate-900">Update Admin Contact Details</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Phone Number</label>
+                        <input 
+                          type="text"
+                          value={adminContact.phone}
+                          onChange={(e) => setAdminContact({ ...adminContact, phone: e.target.value })}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">WhatsApp Number (e.g. 23324XXXXXXX)</label>
+                        <input 
+                          type="text"
+                          value={adminContact.whatsapp}
+                          onChange={(e) => setAdminContact({ ...adminContact, whatsapp: e.target.value })}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Store Owner Title</label>
+                        <input 
+                          type="text"
+                          value={adminProfile.title}
+                          onChange={(e) => setAdminProfile({ ...adminProfile, title: e.target.value })}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">About & Bio</label>
+                        <textarea 
+                          rows="3"
+                          value={adminProfile.bio}
+                          onChange={(e) => setAdminProfile({ ...adminProfile, bio: e.target.value })}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs bg-white"
+                        ></textarea>
+                      </div>
+                      <button 
+                        onClick={() => alert("Contact information updated!")}
+                        className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow transition"
+                      >
+                        Save Information
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ADMIN TAB: SECURITY */}
+                {adminTab === 'security' && (
+                  <div className="bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm space-y-6">
+                    <h3 className="font-serif font-bold text-xl text-slate-900">Change Security Password</h3>
+                    <form onSubmit={handlePasswordChange} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Current Password</label>
+                        <input 
+                          type="password"
+                          required
+                          value={currPassInput}
+                          onChange={(e) => setCurrPassInput(e.target.value)}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">New Password</label>
+                        <input 
+                          type="password"
+                          required
+                          value={newPassInput}
+                          onChange={(e) => setNewPassInput(e.target.value)}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
+                        />
+                      </div>
+                      {passAlert.show && (
+                        <div className={`p-3 rounded-xl text-xs font-bold ${passAlert.type === 'red' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-700'}`}>
+                          {passAlert.msg}
+                        </div>
+                      )}
+                      <button 
+                        type="submit"
+                        className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow transition uppercase tracking-wider"
+                      >
+                        Update Password
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+              </section>
+
+            </div>
+          )}
+        </main>
       )}
 
-      {/* INVOICE MODAL */}
-      {activeInvoice && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div id="invoiceModal" className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl space-y-6">
-            <div className="text-center border-b pb-4">
-              <h2 className="font-serif text-2xl font-bold text-rose-700">Rabi's Chic Fashion Hub</h2>
-              <p className="text-xs text-slate-500">Official UCC Campus Store Invoice</p>
-              <p className="text-xs font-mono font-bold mt-2">{activeInvoice.id}</p>
-            </div>
-            <div className="text-xs space-y-1">
-              <div><b>Customer:</b> {activeInvoice.customer.name} ({activeInvoice.customer.phone})</div>
-              <div><b>Hostel:</b> {activeInvoice.customer.hostel} {activeInvoice.customer.room && `- ${activeInvoice.customer.room}`}</div>
-              <div><b>Date:</b> {activeInvoice.date}</div>
-            </div>
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="border-b text-slate-400">
-                  <th className="pb-2">Item</th>
-                  <th className="pb-2">Qty</th>
-                  <th className="pb-2">Price</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {activeInvoice.items.map((i, idx) => (
-                  <tr key={idx}>
-                    <td className="py-2">{i.name}</td>
-                    <td className="py-2">{i.qty}</td>
-                    <td className="py-2">GH₵ {(i.price * i.qty).toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="flex justify-between font-bold text-sm border-t pt-3">
-              <span>Total Paid:</span>
-              <span className="text-rose-600">GH₵ {activeInvoice.total.toFixed(2)}</span>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => window.print()} className="flex-1 py-2.5 bg-slate-900 text-white font-bold rounded-xl text-xs">Print Receipt</button>
-              <button onClick={() => setActiveInvoice(null)} className="flex-1 py-2.5 bg-rose-100 text-rose-700 font-bold rounded-xl text-xs">Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FOOTER & EDITABLE SOCIALS */}
-      <footer className="mt-16 bg-white border-t border-rose-100 py-8">
-        <div className="max-w-7xl mx-auto px-4 text-center space-y-4">
-          <h3 className="font-serif text-xl font-bold text-rose-700">Rabi's Chic Fashion Hub</h3>
-          <p className="text-xs text-slate-500">University of Cape Coast (UCC), Old Site / New Site, Ghana</p>
-          <div className="flex justify-center gap-6 text-xl text-rose-600">
-            <a href={`https://wa.me/${socials.whatsapp}`} target="_blank" rel="noreferrer" title="WhatsApp"><i className="fa-brands fa-whatsapp"></i></a>
-            <a href={`https://instagram.com/${socials.instagram}`} target="_blank" rel="noreferrer" title="Instagram"><i className="fa-brands fa-instagram"></i></a>
-            <a href={`https://tiktok.com/@${socials.tiktok}`} target="_blank" rel="noreferrer" title="TikTok"><i className="fa-brands fa-tiktok"></i></a>
-            <a href={`https://facebook.com/${socials.facebook}`} target="_blank" rel="noreferrer" title="Facebook"><i className="fa-brands fa-facebook"></i></a>
-            <a href={`https://snapchat.com/add/${socials.snapchat}`} target="_blank" rel="noreferrer" title="Snapchat"><i className="fa-brands fa-snapchat"></i></a>
-            <a href={`tel:${socials.phone}`} title="Call Us"><i className="fa-solid fa-phone"></i></a>
-          </div>
-          <p className="text-[10px] text-slate-400">© 2026 Rabi's Chic Fashion Hub. All rights reserved.</p>
-        </div>
+      {/* FOOTER */}
+      <footer className="bg-white/80 backdrop-blur-md border-t border-rose-100 mt-16 py-8 text-center text-xs text-slate-500 space-y-2">
+        <p className="font-serif font-bold text-slate-800 text-sm">Rabi's Chic Fashion & Campus Essentials</p>
+        <p>Serving Casely Hayford, Valco, Oguaa, Adehye, and all UCC Halls with swift hostel delivery.</p>
       </footer>
+
     </div>
   );
 }
