@@ -8,9 +8,11 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState('');
   const [isError, setIsError] = useState(false);
+  const [adminSession, setAdminSession] = useState(null);
 
   useEffect(() => {
     api.get('/store-contact').then(({ data }) => setAdminContact(data)).catch(() => {});
+    api.get('/admin/session/check').then(({ data }) => { if (data.valid && data.isOwnDevice) setAdminSession(data); }).catch(() => {});
   }, [setAdminContact]);
 
   const saveContact = async (e) => {
@@ -49,6 +51,12 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
         <input readOnly value="Rabis Chic Fashion Hub" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         <label className="mb-1 mt-3 block text-xs font-bold uppercase text-slate-500">Admin email</label>
         <input readOnly value={user?.email || ''} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <h3 className="text-sm font-bold text-slate-900">Current device session</h3>
+        <p className="mt-2 text-xs text-slate-600">Signed in: {adminSession?.loginTime ? new Date(adminSession.loginTime).toLocaleString() : 'Loading'}</p>
+        <p className="mt-1 text-xs text-slate-600">IP address: {adminSession?.ip || 'Unavailable'}</p>
+        <button type="button" onClick={logout} className="mt-4 min-h-10 rounded-full bg-slate-950 px-5 text-xs font-bold text-white">Logout / hand over device</button>
       </div>
       {/* Contact settings */}
       <form onSubmit={saveContact}

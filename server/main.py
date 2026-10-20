@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -56,7 +56,7 @@ if os.getenv("VERCEL") and not os.getenv("RABI_SECRET_KEY"):
     raise RuntimeError("RABI_SECRET_KEY must be configured in Vercel Project Settings")
 if os.getenv("VERCEL") and not storage.enabled():
     raise RuntimeError("DATABASE_URL must be configured for persistent Vercel storage")
-ADMIN_EMAIL = os.getenv("RABI_ADMIN_EMAIL", "").strip().lower()
+ADMIN_EMAIL = (os.getenv("ADMIN_EMAIL") or os.getenv("RABI_ADMIN_EMAIL", "")).strip().lower()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_DAYS = 30
 ADMIN_UNLOCK_MINUTES = 30 * 24 * 60
@@ -165,6 +165,7 @@ DEFAULT_SITE_CONTENT: dict[str, Any] = {
 _onupa_rate_log: dict[str, list[float]] = {}
 _tracking_rate_log: dict[str, list[float]] = {}
 _order_message_rate_log: dict[str, list[float]] = {}
+_admin_login_rate_log: dict[str, list[float]] = {}
 
 
 app = FastAPI(title="Rabi's Chic Fashion Hub API")
@@ -184,7 +185,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Device-Fingerprint", "X-Device-Id"],
 )
 
 
@@ -196,6 +197,15 @@ class SignupRequest(BaseModel):
 
 class PriceUpdate(BaseModel):
     price: float = Field(gt=0, le=1_000_000)
+
+
+class CustomerLocationRequest(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    address: str = Field(default="", max_length=400)
+    isCustom: bool = False
+    collectionPointLabel: str = Field(default="", max_length=120)
+    description: str = Field(default="", max_length=200)
 
 
 class OrderRequest(BaseModel):
@@ -210,6 +220,7 @@ class OrderRequest(BaseModel):
     deliveryOption: str = Field(pattern="^(ucc|accra|outside)$")
     paymentMethod: str = Field(default="MTN MoMo", pattern="^(MTN MoMo|Cash on Delivery)$")
     couponCode: str = Field(default="", max_length=20)
+    customerLocation: CustomerLocationRequest | None = None
 
 
 class ContactMessageRequest(BaseModel):
@@ -447,10 +458,10 @@ def _distance_km(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> floa
 def _delivery_metrics(lat: float, lng: float, destination_lat: float, destination_lng: float) -> dict[str, Any]:
     remaining_km = _distance_km(lat, lng, destination_lat, destination_lng)
     route_km = _distance_km(*SHOP_COORDS, destination_lat, destination_lng)
-    delivered = remaining_km <= 0.02
-    progress = 100 if delivered else 0 if route_km <= 0.05 else int(max(0, min(99, (1 - remaining_km / route_km) * 100)))
-    eta = "Arriving now" if delivered else f"{max(1, math.ceil(remaining_km / 20 * 60))} mins"
-    return {"progress": progress, "eta": eta, "status": "Delivered" if delivered else "On The Way", "distanceKm": round(remaining_km, 2)}
+    arrived = remaining_km <= 0.02
+    progress = 99 if arrived else 0 if route_km <= 0.05 else int(max(0, min(99, (1 - remaining_km / route_km) * 100)))
+    eta = "At destination" if arrived else f"{max(1, math.ceil(remaining_km / 20 * 60))} mins"
+    return {"progress": progress, "eta": eta, "status": "At destination" if arrived else "On The Way", "distanceKm": round(remaining_km, 3), "distanceMeters": int(round(remaining_km * 1000)), "isSamePlaceReached": arrived}
 
 
 def _order_delivery_metrics(lat: float, lng: float, order: dict[str, Any]) -> dict[str, Any]:
@@ -461,8 +472,9 @@ def _order_delivery_metrics(lat: float, lng: float, order: dict[str, Any]) -> di
         metrics["progress"] = min(99, metrics["progress"])
         metrics["eta"] = "Approx. " + ("1 min" if metrics["eta"] == "Arriving now" else metrics["eta"])
         metrics["status"] = "On The Way"
+        metrics["isSamePlaceReached"] = False
     elif order.get("status") == "Delivered":
-        metrics.update(progress=100, eta="Arriving now", status="Delivered")
+        metrics.update(progress=100, eta="Delivered", status="Delivered", isSamePlaceReached=True)
     return metrics
 
 
@@ -513,6 +525,17 @@ class CustomerDestinationUpdate(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
     phone: str = Field(min_length=8, max_length=20)
+    trackingCode: str = Field(min_length=6, max_length=32)
+    address: str = Field(default="", max_length=400)
+    isCustom: bool = False
+    collectionPointLabel: str = Field(default="", max_length=120)
+
+
+class CustomerLiveLocationUpdate(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    phone: str = Field(min_length=8, max_length=20)
+    trackingCode: str = Field(min_length=6, max_length=32)
 
 
 class TransferRequest(BaseModel):
@@ -536,6 +559,20 @@ class PasskeyAuthenticationVerify(BaseModel):
 
 class AdminPasswordUnlock(BaseModel):
     password: str = Field(min_length=1, max_length=128)
+
+
+class AdminLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+    deviceFingerprint: str = Field(min_length=1, max_length=128)
+    deviceId: str = Field(min_length=1, max_length=128)
+    userAgent: str = Field(default="", max_length=500)
+
+
+class AdminLogoutConfirmRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=128)
+    deviceFingerprint: str = Field(min_length=1, max_length=128)
 
 
 class StoreProfileUpdate(BaseModel):
@@ -571,14 +608,124 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in user.items() if key != "password"}
 
 
-def create_access_token(email: str, admin_unlocked: bool = False) -> str:
+def _get_admin_session() -> dict[str, Any]:
+    return storage.get_admin_session() if storage.enabled() else read_data("admin_session.json", {})
+
+
+def _request_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    return forwarded or (request.client.host if request.client else "")
+
+
+def _save_admin_session(session: dict[str, Any]) -> None:
+    if storage.enabled():
+        storage.set_admin_session(session)
+    else:
+        write_data("admin_session.json", session)
+
+
+def _session_is_active(session: dict[str, Any] | None, now: datetime | None = None) -> bool:
+    if not session or not session.get("isActive"):
+        return False
+    try:
+        expires_at = datetime.fromisoformat(str(session.get("expiresAt", "")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return expires_at > (now or datetime.now(timezone.utc))
+
+
+def create_access_token(
+    email: str,
+    admin_unlocked: bool = False,
+    admin_session_id: str | None = None,
+    device_fingerprint: str | None = None,
+) -> str:
     expires = datetime.now(timezone.utc) + (
         timedelta(minutes=ADMIN_UNLOCK_MINUTES) if admin_unlocked else timedelta(days=ACCESS_TOKEN_DAYS)
     )
     payload = {"sub": email, "exp": expires}
     if admin_unlocked:
         payload["admin_unlocked"] = True
+    if admin_session_id:
+        payload["admin_session_id"] = admin_session_id
+        payload["device_fingerprint"] = device_fingerprint or ""
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _decode_admin_token(token: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError as exc:
+        raise HTTPException(status_code=401, detail="Admin session expired. Sign in again.") from exc
+    if not payload.get("admin_unlocked") or not payload.get("admin_session_id"):
+        raise HTTPException(status_code=403, detail="Sign in on this device to access the admin portal")
+    return payload
+
+
+def _require_admin_device(token: str, device_fingerprint: str) -> dict[str, Any]:
+    payload = _decode_admin_token(token)
+    session = _get_admin_session()
+    token_fingerprint = str(payload.get("device_fingerprint", ""))
+    if (
+        not _session_is_active(session)
+        or payload.get("admin_session_id") != session.get("sessionId")
+        or token_fingerprint != session.get("deviceFingerprint")
+        or not device_fingerprint
+        or device_fingerprint != session.get("deviceFingerprint")
+    ):
+        raise HTTPException(status_code=403, detail="Admin portal active on another phone. Only the signed-in device can access it.")
+    try:
+        last_active = datetime.fromisoformat(str(session.get("lastActiveAt", "")).replace("Z", "+00:00"))
+    except ValueError:
+        last_active = datetime.min.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - last_active > timedelta(seconds=60):
+        session["lastActiveAt"] = datetime.now(timezone.utc).isoformat()
+        _save_admin_session(session)
+    return session
+
+
+def _create_admin_device_session(
+    user: dict[str, Any],
+    request: Request,
+    device_fingerprint: str,
+    device_id: str,
+    user_agent: str = "",
+) -> tuple[dict[str, Any], str, str]:
+    if not device_fingerprint or not device_id:
+        raise HTTPException(status_code=400, detail="This device could not be identified. Refresh and try again.")
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    current = _get_admin_session()
+    if _session_is_active(current, now) and current.get("deviceFingerprint") != device_fingerprint:
+        raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
+    same_device = _session_is_active(current, now)
+    session_id = current.get("sessionId") if same_device else secrets.token_urlsafe(32)
+    session = {
+        "adminId": user["id"],
+        "deviceFingerprint": device_fingerprint,
+        "deviceId": device_id,
+        "sessionId": session_id,
+        "isActive": True,
+        "ip": _request_ip(request),
+        "userAgent": (request.headers.get("user-agent") or user_agent)[:500],
+        "createdAt": current.get("createdAt", now_iso) if same_device else now_iso,
+        "lastActiveAt": now_iso,
+        "expiresAt": current.get("expiresAt") if same_device else (now + timedelta(days=ACCESS_TOKEN_DAYS)).isoformat(),
+    }
+    if storage.enabled():
+        claimed, active_session = storage.claim_admin_session(session, now_iso)
+        if not claimed:
+            raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
+        session = active_session
+    else:
+        with DATA_LOCK:
+            latest = _get_admin_session()
+            if _session_is_active(latest, now) and latest.get("deviceFingerprint") != device_fingerprint:
+                raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
+            _save_admin_session(session)
+    regular_token = create_access_token(user["email"], admin_session_id=session_id, device_fingerprint=device_fingerprint)
+    admin_token = create_access_token(user["email"], admin_unlocked=True, admin_session_id=session_id, device_fingerprint=device_fingerprint)
+    return session, regular_token, admin_token
 
 
 def get_current_user(token: str = Depends(OAUTH2_SCHEME)) -> dict[str, Any]:
@@ -596,21 +743,22 @@ def get_current_user(token: str = Depends(OAUTH2_SCHEME)) -> dict[str, Any]:
 def get_current_admin(
     user: dict[str, Any] = Depends(get_current_user),
     token: str = Depends(OAUTH2_SCHEME),
+    device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
 ) -> dict[str, Any]:
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="You need to be an admin or wait for admin's approval")
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError as exc:
-        raise HTTPException(status_code=401, detail="Admin unlock expired") from exc
-    if not payload.get("admin_unlocked"):
-        raise HTTPException(status_code=403, detail="Unlock the admin dashboard to continue")
+    _require_admin_device(token, device_fingerprint)
     return user
 
 
-def get_current_admin_identity(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+def get_current_admin_identity(
+    user: dict[str, Any] = Depends(get_current_user),
+    token: str = Depends(OAUTH2_SCHEME),
+    device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
+) -> dict[str, Any]:
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Administrator account required")
+    _require_admin_device(token, device_fingerprint)
     return user
 
 
@@ -648,22 +796,20 @@ def _verify_passkey_challenge(token: str, user_id: str, kind: str) -> dict[str, 
 def get_current_operator(
     user: dict[str, Any] = Depends(get_current_user),
     token: str = Depends(OAUTH2_SCHEME),
+    device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
 ) -> dict[str, Any]:
     if user["role"] not in {"admin", "rider"}:
         raise HTTPException(status_code=403, detail="A courier account is required to share rider GPS")
     if user["role"] == "admin":
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        except JWTError as exc:
-            raise HTTPException(status_code=401, detail="Admin unlock expired") from exc
-        if not payload.get("admin_unlocked"):
-            raise HTTPException(status_code=403, detail="Unlock the admin dashboard to continue")
+        _require_admin_device(token, device_fingerprint)
     return user
 
 
 @app.post("/signup")
 def signup(request: SignupRequest) -> dict[str, Any]:
     email = request.email.strip().lower()
+    if ADMIN_EMAIL and email == ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="This email is reserved for the configured administrator")
     user = {
         "id": str(uuid4()),
         "email": email,
@@ -694,12 +840,113 @@ def login(form: OAuth2PasswordRequestForm = Depends()) -> dict[str, Any]:
     user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
     if user is None or not PASSWORD_CONTEXT.verify(form.password, user["password"]):
         raise HTTPException(status_code=401, detail="Wrong email or password")
+    if user.get("role") == "admin":
+        raise HTTPException(status_code=403, detail="Use the restricted admin sign-in page to access this account")
     return {
         "access_token": create_access_token(email),
-        "admin_access_token": create_access_token(email, admin_unlocked=True) if user["role"] == "admin" else None,
+        "admin_access_token": None,
         "token_type": "bearer",
         "user": public_user(user),
     }
+
+
+@app.post("/admin/login")
+def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
+    client_ip = _request_ip(request) or "unknown"
+    now_mono = time.monotonic()
+    recent = [stamp for stamp in _admin_login_rate_log.get(client_ip, []) if now_mono - stamp < 600]
+    if len(recent) >= 10:
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Please wait 10 minutes and try again.")
+    recent.append(now_mono)
+    _admin_login_rate_log[client_ip] = recent
+    email = payload.email.strip().lower()
+    if not ADMIN_EMAIL or not secrets.compare_digest(email, ADMIN_EMAIL):
+        raise HTTPException(status_code=403, detail="Only the configured admin can sign in. Access denied.")
+    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
+    configured_password = os.getenv("ADMIN_PASSWORD", "")
+    password_matches = secrets.compare_digest(payload.password, configured_password) if configured_password else bool(user and PASSWORD_CONTEXT.verify(payload.password, user.get("password", "")))
+    if user is None or user.get("role") != "admin" or not password_matches:
+        raise HTTPException(status_code=401, detail="Invalid admin email or password")
+
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    current = _get_admin_session()
+    if _session_is_active(current, now) and current.get("deviceFingerprint") != payload.deviceFingerprint:
+        raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
+    session_id = current.get("sessionId") if _session_is_active(current, now) else secrets.token_urlsafe(32)
+    expires_at = current.get("expiresAt") if _session_is_active(current, now) else (now + timedelta(days=ACCESS_TOKEN_DAYS)).isoformat()
+    session = {
+        "adminId": user["id"],
+        "deviceFingerprint": payload.deviceFingerprint,
+        "deviceId": payload.deviceId,
+        "sessionId": session_id,
+        "isActive": True,
+        "ip": _request_ip(request),
+        "userAgent": request.headers.get("user-agent", payload.userAgent)[:500],
+        "createdAt": current.get("createdAt", now_iso) if _session_is_active(current, now) else now_iso,
+        "lastActiveAt": now_iso,
+        "expiresAt": expires_at,
+    }
+    if storage.enabled():
+        claimed, active_session = storage.claim_admin_session(session, now_iso)
+        if not claimed:
+            raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
+        session = active_session
+    else:
+        with DATA_LOCK:
+            latest = _get_admin_session()
+            if _session_is_active(latest, now) and latest.get("deviceFingerprint") != payload.deviceFingerprint:
+                raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
+            _save_admin_session(session)
+
+    regular_token = create_access_token(email, admin_session_id=session_id, device_fingerprint=payload.deviceFingerprint)
+    admin_token = create_access_token(email, admin_unlocked=True, admin_session_id=session_id, device_fingerprint=payload.deviceFingerprint)
+    return {
+        "access_token": regular_token,
+        "admin_access_token": admin_token,
+        "token_type": "bearer",
+        "user": public_user(user),
+        "session": {"createdAt": session["createdAt"], "expiresAt": session["expiresAt"], "ip": session["ip"]},
+    }
+
+
+@app.get("/admin/status")
+def admin_status() -> dict[str, bool]:
+    return {"hasActiveAdmin": _session_is_active(_get_admin_session())}
+
+
+@app.get("/admin/session/check")
+def admin_session_check(
+    user: dict[str, Any] = Depends(get_current_user),
+    token: str = Depends(OAUTH2_SCHEME),
+    device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
+) -> dict[str, bool]:
+    if user.get("role") != "admin":
+        return {"valid": False, "isOwnDevice": False}
+    try:
+        session = _require_admin_device(token, device_fingerprint)
+    except HTTPException:
+        return {"valid": False, "isOwnDevice": False}
+    return {"valid": True, "isOwnDevice": session.get("adminId") == user.get("id"), "loginTime": session.get("createdAt"), "ip": session.get("ip", "")}
+
+
+@app.post("/admin/logout-confirm")
+def admin_logout_confirm(payload: AdminLogoutConfirmRequest, request: Request) -> dict[str, bool]:
+    email = payload.email.strip().lower()
+    if not ADMIN_EMAIL or not secrets.compare_digest(email, ADMIN_EMAIL):
+        raise HTTPException(status_code=401, detail="Wrong password. Admin logout was not confirmed.")
+    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
+    configured_password = os.getenv("ADMIN_PASSWORD", "")
+    password_matches = secrets.compare_digest(payload.password, configured_password) if configured_password else bool(user and PASSWORD_CONTEXT.verify(payload.password, user.get("password", "")))
+    if user is None or not password_matches:
+        raise HTTPException(status_code=401, detail="Wrong password. Admin logout was not confirmed.")
+    now = datetime.now(timezone.utc)
+    session = _get_admin_session()
+    if not _session_is_active(session, now) or session.get("deviceFingerprint") != payload.deviceFingerprint:
+        raise HTTPException(status_code=403, detail="This device does not own the active admin session")
+    session.update(isActive=False, expiresAt=now.isoformat(), endedAt=now.isoformat(), logoutIp=_request_ip(request))
+    _save_admin_session(session)
+    return {"success": True}
 
 
 def _list_passkeys(user_id: str) -> list[dict[str, Any]]:
@@ -748,7 +995,8 @@ def unlock_admin_with_password(
 ) -> dict[str, str]:
     if not PASSWORD_CONTEXT.verify(payload.password, admin["password"]):
         raise HTTPException(status_code=401, detail="Password did not match")
-    return {"admin_access_token": create_access_token(admin["email"], admin_unlocked=True)}
+    session = _get_admin_session()
+    return {"admin_access_token": create_access_token(admin["email"], admin_unlocked=True, admin_session_id=session.get("sessionId"), device_fingerprint=session.get("deviceFingerprint"))}
 
 
 @app.get("/store-profile")
@@ -908,7 +1156,8 @@ def verify_passkey_authentication(
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Device verification failed") from exc
     _update_passkey_counter(credential_id, verification.new_sign_count, verification.credential_backed_up)
-    return {"admin_access_token": create_access_token(admin["email"], admin_unlocked=True)}
+    session = _get_admin_session()
+    return {"admin_access_token": create_access_token(admin["email"], admin_unlocked=True, admin_session_id=session.get("sessionId"), device_fingerprint=session.get("deviceFingerprint"))}
 
 
 @app.post("/auth/passkey/login/begin")
@@ -922,7 +1171,12 @@ def begin_admin_passkey_login(request: Request) -> dict[str, Any]:
 
 
 @app.post("/auth/passkey/login/finish")
-def finish_admin_passkey_login(payload: PasskeyAuthenticationVerify) -> dict[str, Any]:
+def finish_admin_passkey_login(
+    payload: PasskeyAuthenticationVerify,
+    request: Request,
+    device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
+    device_id: str = Header(default="", alias="X-Device-Id"),
+) -> dict[str, Any]:
     challenge = _verify_passkey_challenge(payload.challenge_token, "public-admin-passkey-login", "login")
     credential_id = payload.credential.get("id", "")
     passkey = _get_passkey(credential_id)
@@ -944,9 +1198,16 @@ def finish_admin_passkey_login(payload: PasskeyAuthenticationVerify) -> dict[str
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Device verification failed") from exc
     _update_passkey_counter(credential_id, verification.new_sign_count, verification.credential_backed_up)
+    _, regular_token, admin_token = _create_admin_device_session(
+        admin,
+        request,
+        device_fingerprint,
+        device_id,
+        request.headers.get("user-agent", ""),
+    )
     return {
-        "access_token": create_access_token(admin["email"]),
-        "admin_access_token": create_access_token(admin["email"], admin_unlocked=True),
+        "access_token": regular_token,
+        "admin_access_token": admin_token,
         "token_type": "bearer",
         "user": public_user(admin),
     }
@@ -1278,6 +1539,7 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
         discount_amount = round(subtotal * 0.10, 2)
     total = round(subtotal - discount_amount + delivery_fee, 2)
     order_id = f"RABI-{secrets.token_hex(16).upper()}"
+    customer_location = request.customerLocation.model_dump() if request.customerLocation else None
     order = {
         **request.model_dump(),
         "amount": total,
@@ -1289,7 +1551,7 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
             "total": total,
         },
         "id": order_id,
-        "trackingCode": f"RABIS-{secrets.token_hex(3).upper()}",
+        "trackingCode": f"RABIS-{secrets.token_hex(6).upper()}",
         "approvalStatus": "pending_approval",
         "trackingEnabled": False,
         "status": "Submitted - Pending Admin Approval",
@@ -1298,7 +1560,13 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
         "riderUserId": None,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "notificationStatus": {"adminEmail": "queued", "customerEmail": "queued", "sms": "queued"},
-        "destinationShared": False,
+        "destinationLat": customer_location["lat"] if customer_location else DEFAULT_DESTINATION_COORDS[0],
+        "destinationLng": customer_location["lng"] if customer_location else DEFAULT_DESTINATION_COORDS[1],
+        "destinationAddress": customer_location.get("address", "") if customer_location else "",
+        "destinationShared": bool(customer_location),
+        "customerLocation": customer_location,
+        "customerLat": customer_location["lat"] if customer_location else None,
+        "customerLng": customer_location["lng"] if customer_location else None,
         "unreadCount": 0,
         "messages": [],
         "paymentStatus": "pending",
@@ -1340,7 +1608,7 @@ def get_public_tracking_status(tracking_code: str, request: Request) -> dict[str
     if order is None:
         raise HTTPException(status_code=404, detail="Tracking code not found")
     approval_status = order.get("approvalStatus", "approved" if order.get("status") == "In Transit" else "pending_approval")
-    safe_order = {key: order.get(key) for key in ("id", "trackingCode", "status", "progress", "eta", "hostel", "room", "items", "quantity", "amount", "phone", "customer", "destinationLat", "destinationLng", "rating", "deliveredAt")}
+    safe_order = {key: order.get(key) for key in ("id", "trackingCode", "status", "progress", "eta", "hostel", "room", "items", "quantity", "amount", "phone", "customer", "destinationLat", "destinationLng", "destinationAddress", "customerLocation", "customerLat", "customerLng", "rating", "review", "deliveredAt")}
     return {"approvalStatus": approval_status, "trackingEnabled": bool(order.get("trackingEnabled", order.get("status") == "In Transit")), "trackingCode": order.get("trackingCode"), "order": safe_order}
 
 
@@ -1437,6 +1705,27 @@ def review_delivered_order(order_id: str, request: OrderReviewRequest) -> dict[s
     return order
 
 
+@app.post("/orders/track/{tracking_code}/delivered")
+def review_by_tracking_code(tracking_code: str, request: OrderReviewRequest) -> dict[str, Any]:
+    order = storage.get_order_by_tracking_code(tracking_code.upper()) if storage.enabled() else next((item for item in ORDERS.values() if str(item.get("trackingCode", "")).upper() == tracking_code.upper()), None)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Tracking code not found")
+    phone = "".join(character for character in request.phone if character.isdigit())
+    expected = "".join(character for character in str(order.get("phone", "")) if character.isdigit())
+    if not phone or phone != expected:
+        raise HTTPException(status_code=403, detail="Enter the phone number used for this order")
+    if "delivered" not in str(order.get("status", "")).lower():
+        raise HTTPException(status_code=409, detail="The courier has not marked this delivery as complete yet")
+    order.update(deliverySuccess=True, deliveredAt=order.get("deliveredAt") or datetime.now(timezone.utc).isoformat(), rating=request.rating, review=request.review.strip())
+    if "cash" in str(order.get("paymentMethod", "")).lower():
+        order["paymentStatus"] = "paid"
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return order
+
+
 @app.post("/orders/{order_id}/mark-paid")
 def mark_order_paid(order_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
     order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
@@ -1451,11 +1740,22 @@ def mark_order_paid(order_id: str, _: dict[str, Any] = Depends(get_current_admin
 
 
 @app.post("/orders/{order_id}/mark-delivered")
-def mark_order_delivered(order_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+def mark_order_delivered(order_id: str, operator: dict[str, Any] = Depends(get_current_operator)) -> dict[str, Any]:
     order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    order.update(status="Delivered", progress=100, eta="Delivered", deliveredAt=datetime.now(timezone.utc).isoformat())
+    if operator["role"] == "rider" and order.get("riderUserId") != operator["id"]:
+        raise HTTPException(status_code=403, detail="This delivery is not assigned to your courier account")
+    if operator["role"] == "rider":
+        if not order.get("destinationShared"):
+            raise HTTPException(status_code=409, detail="Set the customer's delivery location before confirming arrival")
+        point = live_locations.get(order_id) or (storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id))
+        if not point or _distance_km(float(point.get("lat", 0)), float(point.get("lng", 0)), float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0])), float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))) > 0.02:
+            raise HTTPException(status_code=409, detail="Confirm delivery after reaching the customer’s location")
+    delivered_at = order.get("deliveredAt") or datetime.now(timezone.utc).isoformat()
+    order.update(status="Delivered", approvalStatus="approved", trackingEnabled=True, progress=100, eta="Delivered", deliveredAt=delivered_at, deliverySuccess=True, isSamePlaceReached=True)
+    if "cash" in str(order.get("paymentMethod", "")).lower():
+        order["paymentStatus"] = "paid"
     if storage.enabled():
         storage.save_order(order)
     else:
@@ -1502,7 +1802,8 @@ def approve_order(
     order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    order.update(status="In Transit", approvalStatus="approved", trackingEnabled=True, progress=0, eta="Waiting for rider GPS")
+    initial_distance = _distance_km(SHOP_COORDS[0], SHOP_COORDS[1], float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0])), float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1])))
+    order.update(status="In Transit", approvalStatus="approved", trackingEnabled=True, progress=0, eta="Waiting for rider GPS", initialDistanceKm=round(initial_distance, 3))
     if storage.enabled():
         storage.save_order(order)
     else:
@@ -1534,6 +1835,8 @@ async def update_rider_location(
         raise HTTPException(status_code=404, detail="Order not found")
     if operator["role"] == "rider" and order.get("riderUserId") != operator["id"]:
         raise HTTPException(status_code=403, detail="This delivery is not assigned to your courier account")
+    if order.get("approvalStatus") == "pending_approval" or order.get("trackingEnabled") is False:
+        raise HTTPException(status_code=409, detail="Tracking starts after admin approval")
     destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
     destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
     metrics = _order_delivery_metrics(location.lat, location.lng, order)
@@ -1578,11 +1881,11 @@ async def update_customer_destination(order_id: str, location: CustomerDestinati
         raise HTTPException(status_code=404, detail="Order not found")
     supplied_phone = "".join(character for character in location.phone if character.isdigit())
     order_phone = "".join(character for character in str(order.get("phone", "")) if character.isdigit())
-    if not supplied_phone or supplied_phone != order_phone:
+    if not supplied_phone or supplied_phone != order_phone or not secrets.compare_digest(location.trackingCode.upper(), str(order.get("trackingCode", "")).upper()):
         raise HTTPException(status_code=403, detail="Confirm the phone number used for this order")
 
     was_destination_shared = bool(order.get("destinationShared"))
-    order.update(destinationLat=location.lat, destinationLng=location.lng, destinationShared=True)
+    order.update(destinationLat=location.lat, destinationLng=location.lng, destinationAddress=location.address.strip(), destinationShared=True, customerLocation={"lat": location.lat, "lng": location.lng, "address": location.address.strip(), "isCustom": location.isCustom, "collectionPointLabel": location.collectionPointLabel.strip()})
     point = storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id)
     if not point:
         point = live_locations.get(order_id)
@@ -1624,16 +1927,71 @@ async def update_customer_destination(order_id: str, location: CustomerDestinati
     return response
 
 
+@app.post("/orders/{order_id}/customer-location")
+async def update_customer_live_location(order_id: str, location: CustomerLiveLocationUpdate) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    supplied_phone = "".join(character for character in location.phone if character.isdigit())
+    order_phone = "".join(character for character in str(order.get("phone", "")) if character.isdigit())
+    if not supplied_phone or supplied_phone != order_phone or not secrets.compare_digest(location.trackingCode.upper(), str(order.get("trackingCode", "")).upper()):
+        raise HTTPException(status_code=403, detail="Confirm the phone number used for this order")
+    if order.get("approvalStatus") != "approved":
+        raise HTTPException(status_code=409, detail="Customer location sharing starts after admin approval")
+    order.update(customerLat=location.lat, customerLng=location.lng, destinationLat=location.lat, destinationLng=location.lng, destinationShared=True)
+    if isinstance(order.get("customerLocation"), dict):
+        order["customerLocation"].update(lat=location.lat, lng=location.lng)
+    point = live_locations.get(order_id) or (storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id))
+    if point and isinstance(point.get("lat"), (int, float)) and isinstance(point.get("lng"), (int, float)):
+        metrics = _delivery_metrics(float(point["lat"]), float(point["lng"]), location.lat, location.lng)
+        point = {
+            **point,
+            **metrics,
+            "status": "Delivered" if order.get("status") == "Delivered" else metrics["status"],
+            "progress": 100 if order.get("status") == "Delivered" else min(99, metrics["progress"]),
+            "eta": "Delivered" if order.get("status") == "Delivered" else metrics["eta"],
+            "customerLat": location.lat,
+            "customerLng": location.lng,
+            "destinationLat": location.lat,
+            "destinationLng": location.lng,
+            "destinationShared": True,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        live_locations[order_id] = point
+        if storage.enabled():
+            storage.save_location(order_id, point)
+        else:
+            RIDER_LOCATIONS[order_id] = point
+        order.update(status=point["status"], progress=point["progress"], eta=point["eta"], isSamePlaceReached=bool(point.get("isSamePlaceReached")))
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        ORDERS[order_id] = order
+        write_data("orders.json", ORDERS)
+    response = {"customerLat": location.lat, "customerLng": location.lng, "destinationLat": location.lat, "destinationLng": location.lng, "destinationShared": True, "isSamePlaceReached": bool(point and point.get("isSamePlaceReached"))}
+    for socket in list(CONNECTED_TRACKERS.get(order_id, set())):
+        try:
+            await socket.send_json({**{key: value for key, value in (point or {}).items() if key not in {"phone", "order_id"}}, **response, "order_id": order_id, "status": order.get("status"), "progress": order.get("progress", 0), "eta": order.get("eta")})
+        except WebSocketDisconnect:
+            CONNECTED_TRACKERS[order_id].discard(socket)
+    return response
+
+
 # ── Live-location convenience endpoint (simple in-memory, Vercel-compatible) ──
 @app.post("/orders/{order_id}/update-location")
 def simple_update_location(
     order_id: str,
     location: LocationUpdate,
+    operator: dict[str, Any] = Depends(get_current_operator),
 ) -> dict[str, Any]:
     """Rider app posts lat/lng here; polling customers read it back."""
     order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
+    if operator["role"] == "rider" and order.get("riderUserId") != operator["id"]:
+        raise HTTPException(status_code=403, detail="This delivery is not assigned to your courier account")
+    if order.get("approvalStatus") == "pending_approval" or order.get("trackingEnabled") is False:
+        raise HTTPException(status_code=409, detail="Tracking starts after admin approval")
     destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
     destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
     metrics = _order_delivery_metrics(location.lat, location.lng, order)
@@ -1668,9 +2026,11 @@ def simple_update_location(
 
 
 @app.get("/orders/{order_id}/live-location")
-def live_location(order_id: str) -> dict[str, Any]:
+def live_location(order_id: str, trackingCode: str, phone: str) -> dict[str, Any]:
     order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
-    if order is None:
+    supplied_phone = "".join(character for character in phone if character.isdigit())
+    expected_phone = "".join(character for character in str((order or {}).get("phone", "")) if character.isdigit())
+    if order is None or not secrets.compare_digest(trackingCode.upper(), str(order.get("trackingCode", "")).upper()) or not supplied_phone or not secrets.compare_digest(supplied_phone, expected_phone):
         raise HTTPException(status_code=404, detail="Order not found")
     # Prefer in-memory live_locations, fall back to RIDER_LOCATIONS / storage
     point = live_locations.get(order_id) or (
@@ -1678,10 +2038,12 @@ def live_location(order_id: str) -> dict[str, Any]:
     )
     if point:
         return {
-            **point,
+            **{key: value for key, value in point.items() if key not in {"phone", "order_id"}},
             "destinationLat": order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]),
             "destinationLng": order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]),
             "destinationShared": bool(order.get("destinationShared")),
+            "customerLat": order.get("customerLat"),
+            "customerLng": order.get("customerLng"),
         }
     return {
         "status": order.get("status", "Waiting for rider GPS"),
@@ -1690,6 +2052,8 @@ def live_location(order_id: str) -> dict[str, Any]:
         "destinationLat": order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]),
         "destinationLng": order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]),
         "destinationShared": bool(order.get("destinationShared")),
+        "customerLat": order.get("customerLat"),
+        "customerLng": order.get("customerLng"),
         "order_id": order_id,
     }
 
@@ -1785,7 +2149,10 @@ def update_site_content(
 @app.websocket("/ws/track/{order_id}")
 async def websocket_track(websocket: WebSocket, order_id: str) -> None:
     order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
-    if order is None:
+    tracking_code = websocket.query_params.get("trackingCode", "").upper()
+    phone = "".join(character for character in websocket.query_params.get("phone", "") if character.isdigit())
+    expected_phone = "".join(character for character in str((order or {}).get("phone", "")) if character.isdigit())
+    if order is None or not secrets.compare_digest(tracking_code, str(order.get("trackingCode", "")).upper()) or not phone or not secrets.compare_digest(phone, expected_phone):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -1795,7 +2162,7 @@ async def websocket_track(websocket: WebSocket, order_id: str) -> None:
             order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
             point = storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id)
             await websocket.send_json({
-                **(point or {}),
+                **{key: value for key, value in (point or {}).items() if key not in {"phone", "order_id"}},
                 "order_id": order_id,
                 "status": (point or {}).get("status", (order or {}).get("status")),
                 "progress": (point or {}).get("progress", (order or {}).get("progress", 0)),
@@ -1804,7 +2171,10 @@ async def websocket_track(websocket: WebSocket, order_id: str) -> None:
                 "room": (order or {}).get("room"),
                 "destinationLat": (order or {}).get("destinationLat", DEFAULT_DESTINATION_COORDS[0]),
                 "destinationLng": (order or {}).get("destinationLng", DEFAULT_DESTINATION_COORDS[1]),
+                "destinationAddress": (order or {}).get("destinationAddress", ""),
                 "destinationShared": bool((order or {}).get("destinationShared")),
+                "customerLat": (order or {}).get("customerLat"),
+                "customerLng": (order or {}).get("customerLng"),
             })
             await asyncio.sleep(3)
     except WebSocketDisconnect:

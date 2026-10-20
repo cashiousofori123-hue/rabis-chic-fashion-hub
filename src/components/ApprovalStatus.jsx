@@ -12,7 +12,7 @@ export default function ApprovalStatus({ trackingCode, onApproved }) {
       const { data } = await api.get(`/orders/track/${encodeURIComponent(trackingCode)}/status`);
       setStatus(data.approvalStatus);
       setError('');
-      if (data.approvalStatus === 'approved' && data.trackingEnabled) onApproved(data.order);
+      if (data.approvalStatus === 'approved' && data.trackingEnabled) onApproved({ ...data.order, approvalStatus: data.approvalStatus, trackingEnabled: data.trackingEnabled });
       if (data.approvalStatus === 'rejected') setError('The store could not approve this order. Please contact Rabi’s Chic for help.');
     } catch (requestError) { setError(requestError.response?.data?.detail || 'Could not check this tracking code.'); }
     finally { setChecking(false); }

@@ -13,6 +13,7 @@ const WishlistPage = lazy(() => import('./pages/Wishlist'));
 const FAQPage = lazy(() => import('./pages/FAQ'));
 const AccountPage = lazy(() => import('./pages/Account'));
 const TrackOrder      = lazy(() => import('./components/TrackOrder'));
+const CheckoutLocationPicker = lazy(() => import('./components/CheckoutLocationPicker'));
 const Overview        = lazy(() => import('./pages/admin/Overview'));
 const Products        = lazy(() => import('./pages/admin/Products'));
 const Orders          = lazy(() => import('./pages/admin/Orders'));
@@ -107,19 +108,32 @@ const optimizeProductImage = (imageUrl) => {
 };
 
 export default function App() {
-  const { user, role, authReady, adminUnlocked, login, logout, unlockAdmin, lockAdmin } = useAuth();
+  const { user, role, authReady, adminUnlocked, adminSessionReady, login, loginAdmin, logout, confirmAdminLogout, unlockAdmin, lockAdmin } = useAuth();
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  const [hasActiveAdmin, setHasActiveAdmin] = useState(null);
+  const [adminLogoutStep, setAdminLogoutStep] = useState(0);
+  const [adminLogoutPassword, setAdminLogoutPassword] = useState('');
+  const [adminLogoutPasswordVisible, setAdminLogoutPasswordVisible] = useState(false);
+  const [adminLogoutError, setAdminLogoutError] = useState('');
+  const [adminLogoutBusy, setAdminLogoutBusy] = useState(false);
   useEffect(() => {
     const syncPath = () => setRoutePath(window.location.pathname);
     window.addEventListener('popstate', syncPath);
     return () => window.removeEventListener('popstate', syncPath);
   }, []);
   useEffect(() => {
-    if (routePath.startsWith('/admin') && routePath !== '/admin-secret-login-rabis2024' && authReady && !user) {
-      window.history.replaceState({}, '', '/login');
-      setRoutePath('/login');
-    }
-  }, [routePath, authReady, user, role]);
+    let active = true;
+    const refresh = () => api.get('/admin/status').then(({ data }) => { if (active) setHasActiveAdmin(Boolean(data.hasActiveAdmin)); }).catch(() => { if (active) setHasActiveAdmin(true); });
+    refresh();
+    const timer = window.setInterval(refresh, 12000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    const requestLogout = () => { setAdminLogoutStep(1); setAdminLogoutError(''); setAdminLogoutPassword(''); };
+    window.addEventListener('rabis:request-admin-logout', requestLogout);
+    return () => window.removeEventListener('rabis:request-admin-logout', requestLogout);
+  }, []);
 
   const [activeView, setActiveView] = useState('store'); // 'store', 'tracker', 'lookup', 'about', 'contact', 'admin'
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -244,6 +258,59 @@ export default function App() {
     paymentMethod: 'MTN MoMo',
     couponCode: ''
   });
+  const [detectedCustomerLocation, setDetectedCustomerLocation] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('detectedCustomerLocation') || 'null'); } catch { return null; }
+  });
+  const detectedCustomerLocationRef = useRef(detectedCustomerLocation);
+  const [checkoutLocationStatus, setCheckoutLocationStatus] = useState('');
+  const [locationSearchText, setLocationSearchText] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
+  const [showCheckoutMap, setShowCheckoutMap] = useState(false);
+  const customLocationSelectionRef = useRef(false);
+
+  useEffect(() => {
+    if (routePath !== '/shop' || !navigator.geolocation) return undefined;
+    let active = true;
+    let watchId = null;
+    setCheckoutLocationStatus('Detecting location automatically…');
+    const saveLocation = async (coords, reverse = false) => {
+      if (!active) return;
+      if (customLocationSelectionRef.current && !reverse) return;
+      const location = { lat: coords.latitude, lng: coords.longitude, address: detectedCustomerLocationRef.current?.address || '', isCustom: false, collectionPointLabel: '' };
+      if (reverse || !location.address) {
+        try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.latitude}&lon=${coords.longitude}`);
+          const result = await response.json();
+          location.address = result.display_name || `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
+        } catch { location.address = `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`; }
+      }
+      if (!active) return;
+      setDetectedCustomerLocation(location);
+      detectedCustomerLocationRef.current = location;
+      localStorage.setItem('detectedCustomerLocation', JSON.stringify(location));
+      setCheckoutLocationStatus(`We detected you at ${location.address}`);
+    };
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      if (!active) return;
+      saveLocation(coords, true);
+      watchId = navigator.geolocation.watchPosition(({ coords: next }) => saveLocation(next), () => {}, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+    }, error => setCheckoutLocationStatus(error.message || 'Location permission was not available. Search for your location below.'), { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+    return () => { active = false; if (watchId != null) navigator.geolocation.clearWatch(watchId); };
+  }, [routePath]);
+
+  useEffect(() => {
+    const query = locationSearchText.trim();
+    if (query.length < 3) { setLocationSuggestions([]); return undefined; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=${encodeURIComponent(query)}`, { signal: controller.signal });
+        const places = await response.json();
+        setLocationSuggestions(Array.isArray(places) ? places : []);
+      } catch { if (!controller.signal.aborted) setLocationSuggestions([]); }
+    }, 500);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [locationSearchText]);
 
   const [orderStage, setOrderStage] = useState('idle');
   const [approvalNotice, setApprovalNotice] = useState('');
@@ -477,37 +544,26 @@ export default function App() {
       .catch(() => setAdminPasskeys([]));
   }, [activeView, adminTab, adminUnlocked, isAdminAccount]);
 
-  useEffect(() => {
-    if (!adminUnlocked) return undefined;
-    let timeoutId;
-    const expireUnlock = () => {
-      const expiresAt = Number(localStorage.getItem('rabi_admin_unlocked_until') || 0);
-      if (expiresAt > Date.now()) {
-        timeoutId = window.setTimeout(expireUnlock, expiresAt - Date.now());
-        return;
-      }
-      lockAdmin();
-      if (window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin-secret-login-rabis2024') {
-        window.history.replaceState({}, '', '/rabis-admin');
-        setRoutePath('/rabis-admin');
-      }
-      setPasskeyMessage('Admin access expired. Sign in again to continue.');
-    };
-    const scheduleExpiry = () => {
-      window.clearTimeout(timeoutId);
-      const expiresAt = Number(localStorage.getItem('rabi_admin_unlocked_until') || 0);
-      timeoutId = window.setTimeout(expireUnlock, Math.max(0, expiresAt - Date.now()));
-    };
-    const syncAcrossTabs = (event) => {
-      if (event.key === 'rabi_admin_unlocked_until' || event.key === 'rabi_admin_access_token') scheduleExpiry();
-    };
-    scheduleExpiry();
-    window.addEventListener('storage', syncAcrossTabs);
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener('storage', syncAcrossTabs);
-    };
-  }, [adminUnlocked]);
+  const completeAdminLogout = async () => {
+    if (!adminLogoutPassword || adminLogoutBusy) return;
+    setAdminLogoutBusy(true);
+    setAdminLogoutError('');
+    try {
+      await confirmAdminLogout(adminLogoutPassword);
+      setHasActiveAdmin(false);
+      setAdminLogoutStep(0);
+      setAdminLogoutPassword('');
+      window.history.replaceState({}, '', '/');
+      setRoutePath('/');
+      setActiveView('store');
+    } catch (error) {
+      setAdminLogoutError(error.response?.data?.detail || 'Wrong password. Cannot logout.');
+    } finally { setAdminLogoutBusy(false); }
+  };
+
+  const adminLogoutModal = adminLogoutStep > 0 ? <div className="fixed inset-0 z-[1200] grid place-items-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-labelledby="admin-logout-title"><section className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+    {adminLogoutStep === 1 ? <><h2 id="admin-logout-title" className="text-lg font-bold text-slate-900">Are you sure you want to logout?</h2><p className="mt-2 text-sm leading-6 text-slate-600">After logout, Admin Sign In becomes visible for handover. The next admin device will see the portal.</p><div className="mt-6 flex gap-2"><button type="button" onClick={() => setAdminLogoutStep(0)} className="min-h-11 flex-1 rounded-full bg-slate-100 px-4 text-sm font-bold text-slate-700">Cancel</button><button type="button" onClick={() => { setAdminLogoutStep(2); setAdminLogoutError(''); }} className="min-h-11 flex-1 rounded-full bg-slate-950 px-4 text-sm font-bold text-white">Yes, I want to logout</button></div></> : <><h2 id="admin-logout-title" className="text-lg font-bold text-slate-900">Confirm admin logout</h2><p className="mt-2 text-sm text-slate-600">Enter the admin password to confirm handover.</p><div className="mt-4 flex gap-2"><input autoFocus type={adminLogoutPasswordVisible ? 'text' : 'password'} value={adminLogoutPassword} onChange={event => setAdminLogoutPassword(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') completeAdminLogout(); }} placeholder="Admin password" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><button type="button" onClick={() => setAdminLogoutPasswordVisible(value => !value)} className="rounded-xl border border-slate-200 px-3 text-xs font-semibold">{adminLogoutPasswordVisible ? 'Hide' : 'Show'}</button></div>{adminLogoutError && <p role="alert" className="mt-2 text-xs font-semibold text-red-600">{adminLogoutError}</p>}<div className="mt-6 flex gap-2"><button type="button" onClick={() => setAdminLogoutStep(1)} className="min-h-11 flex-1 rounded-full bg-slate-100 px-4 text-sm font-bold text-slate-700">Back</button><button type="button" disabled={adminLogoutBusy || !adminLogoutPassword} onClick={completeAdminLogout} className="min-h-11 flex-1 rounded-full bg-red-600 px-4 text-sm font-bold text-white disabled:opacity-50">{adminLogoutBusy ? 'Confirming…' : 'Confirm Logout'}</button></div></>}
+  </section></div> : null;
 
   const validateGhanaPhone = (phoneNum) => {
     const cleaned = phoneNum.replace(/[\s-]/g, '');
@@ -552,6 +608,13 @@ export default function App() {
       deliveryOption: checkoutData.deliveryOption,
       paymentMethod: checkoutData.paymentMethod,
       couponCode: checkoutData.couponCode,
+      customerLocation: detectedCustomerLocation ? {
+        lat: Number(detectedCustomerLocation.lat),
+        lng: Number(detectedCustomerLocation.lng),
+        address: detectedCustomerLocation.address || '',
+        isCustom: Boolean(detectedCustomerLocation.isCustom),
+        collectionPointLabel: detectedCustomerLocation.collectionPointLabel || '',
+      } : null,
       });
       setOrders([newOrder, ...orders]);
       setSelectedOrderForTracking(newOrder);
@@ -840,19 +903,29 @@ export default function App() {
     else if (routePath === '/contact') setActiveView('contact');
   }, [routePath, Boolean(activeTrackingOrder)]);
 
-  if (routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
+  useEffect(() => {
+    if ((routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') && authReady && adminSessionReady && adminUnlocked && role === 'admin') {
+      window.history.replaceState({}, '', '/admin');
+      setRoutePath('/admin');
+    }
+  }, [routePath, authReady, adminSessionReady, adminUnlocked, role]);
+
+  if (routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
+    if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-slate-950" />;
+    if (adminUnlocked && role === 'admin') return <div className="min-h-screen bg-white" />;
+    if ((role && role !== 'admin') || hasActiveAdmin) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only that phone can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
     return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
+      <AdminLogin onSuccess={() => { setHasActiveAdmin(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
   }
 
   if (routePath.startsWith('/admin')) {
-    if (!authReady) return <div className="min-h-screen bg-rose-50/40" />;
-    if (!user) return <Suspense fallback={<div className="min-h-screen bg-white" />}><AccountPage mode="login" onBack={() => navigateTo('/')} onNavigate={navigateTo} /></Suspense>;
-    if (role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><div className="mt-6 flex justify-center gap-2"><button onClick={() => navigateTo('/shop')} className="min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store</button><button onClick={() => navigateTo('/')} className="min-h-11 rounded-full border border-slate-300 px-5 text-sm font-bold">Go Home</button></div></section></main>;
-    if (!adminUnlocked) return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
-    </Suspense>;
+    if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-white" />;
+    if (role && role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
+    if (!adminUnlocked) {
+      if (hasActiveAdmin) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only the signed-in device can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
+      return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}><AdminLogin onSuccess={() => { setHasActiveAdmin(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></Suspense>;
+    }
     const pages = {
       '/admin/overview': <Overview />,
       '/admin/products': <Products />,
@@ -879,9 +952,10 @@ export default function App() {
       <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
         {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
           onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
-          onLogout={() => { logout(); window.history.replaceState({}, '', '/'); setRoutePath('/'); }} />
+          onLogout={logout} />
           : pages[routePath] || pages['/admin/overview']}
       </Suspense>
+      {adminLogoutModal}
     </>;
   }
 
@@ -907,6 +981,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
+      {adminLogoutModal}
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
           <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· {formatCurrency(adminOrderAlert.amount)}</p>
@@ -1082,13 +1157,13 @@ export default function App() {
 
             {!user ? <div className="hidden items-center gap-1 lg:flex"><button onClick={() => navigateTo('/login')} className="rounded-full px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Sign Up</button></div>
               : <div className="relative hidden lg:block"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-slate-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
-                {accountMenuOpen && <div className="absolute right-0 top-12 z-[90] w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-[11px] text-slate-500">{user.email}</p><button onClick={() => navigateTo('/orders')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">My Orders</button><button onClick={() => navigateTo('/wishlist')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">Wishlist</button>{isAdminAccount && <button onClick={() => navigateTo('/admin')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50">Admin Portal</button>}<button onClick={() => { logout(); navigateTo('/login'); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">Log Out</button></div>}
+                {accountMenuOpen && <div className="absolute right-0 top-12 z-[90] w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-[11px] text-slate-500">{user.email}</p><button onClick={() => navigateTo('/orders')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">My Orders</button><button onClick={() => navigateTo('/wishlist')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">Wishlist</button>{isAdminAuthenticated && <button onClick={() => navigateTo('/admin')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50">Admin Portal</button>}<button onClick={() => { logout(); if (role !== 'admin') navigateTo('/login'); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">Log Out</button></div>}
               </div>}
 
             <button onClick={() => setMobileMenuOpen(value => !value)} aria-label="Open navigation" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 lg:hidden">{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
 
             {/* Only an authenticated administrator sees the dashboard link. */}
-            {isAdminAccount && (
+            {isAdminAuthenticated && (
               <button
                 onClick={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }}
                 className="hidden lg:flex px-2.5 py-2 rounded-xl text-xs font-bold transition items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
@@ -1099,7 +1174,7 @@ export default function App() {
           </div>
         </div>
         <div className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto px-3 pb-2 lg:hidden"><button onClick={() => navigateTo('/shop')} className="min-h-10 shrink-0 snap-start rounded-full bg-slate-950 px-4 text-xs font-bold text-white">🛍️ Shop</button><button onClick={() => navigateTo('/track')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">📍 Track Order</button><button onClick={() => navigateTo('/about')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">ℹ️ About</button><button onClick={() => navigateTo('/contact')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">✉️ Contact</button></div>
-        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div><div className="fixed inset-x-4 bottom-4 grid grid-cols-2 gap-2 border-t border-slate-100 bg-white pt-3">{!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); navigateTo('/login'); }} className="col-span-2 min-h-11 rounded-xl bg-red-50 text-sm font-bold text-red-700">Log Out</button>}{isAdminAccount && <button onClick={() => navigateTo('/admin')} className="col-span-2 min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button>}</div></nav>}
+        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div><div className="fixed inset-x-4 bottom-4 grid grid-cols-2 gap-2 border-t border-slate-100 bg-white pt-3">{!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); if (role !== 'admin') navigateTo('/login'); }} className="col-span-2 min-h-11 rounded-xl bg-red-50 text-sm font-bold text-red-700">Log Out</button>}{isAdminAuthenticated && <button onClick={() => navigateTo('/admin')} className="col-span-2 min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button>}</div></nav>}
       </header>
 
       {siteContent?.noticeBar?.active && siteContent.noticeBar.text && <div role="status" className={`px-4 py-2 text-center text-xs font-semibold ${siteContent.noticeBar.type === 'sale' ? 'bg-black text-white' : siteContent.noticeBar.type === 'out_of_stock' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>{siteContent.noticeBar.text}</div>}
@@ -1312,6 +1387,43 @@ export default function App() {
                         <option>KNH Hostel</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="relative rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-bold uppercase text-slate-700">Delivery pin</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{checkoutLocationStatus || 'Detecting location automatically…'}</p>
+                    <button type="button" onClick={() => {
+                      if (!detectedCustomerLocation) { setCheckoutLocationStatus('Allow location access or search for a place below.'); return; }
+                      customLocationSelectionRef.current = false;
+                      const pinned = { ...detectedCustomerLocation, isCustom: false, collectionPointLabel: 'Collection point' };
+                      setDetectedCustomerLocation(pinned);
+                      detectedCustomerLocationRef.current = pinned;
+                      localStorage.setItem('detectedCustomerLocation', JSON.stringify(pinned));
+                      setCheckoutLocationStatus(`Collection point set to ${pinned.address || 'your current location'}.`);
+                    }} className="mt-3 min-h-10 rounded-full border border-slate-300 px-4 text-xs font-bold text-slate-800 hover:bg-slate-50">I want to collect it HERE</button>
+                    <label className="mt-3 block text-[11px] font-semibold text-slate-600">Change delivery location
+                      <input value={locationSearchText} onChange={event => setLocationSearchText(event.target.value)} placeholder="Search a place or address" className="mt-1 min-h-10 w-full rounded-xl border border-slate-200 px-3 text-xs font-normal outline-none focus:border-slate-500" />
+                    </label>
+                    <button type="button" onClick={() => setShowCheckoutMap(value => !value)} className="mt-2 min-h-9 rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-slate-700">{showCheckoutMap ? 'Hide map' : 'Choose on map'}</button>
+                    {showCheckoutMap && <Suspense fallback={<p className="mt-2 text-xs text-slate-500">Loading map…</p>}><div className="mt-2 overflow-hidden rounded-xl"><CheckoutLocationPicker value={detectedCustomerLocation} onSelect={point => {
+                      customLocationSelectionRef.current = true;
+                      setDetectedCustomerLocation(point);
+                      detectedCustomerLocationRef.current = point;
+                      localStorage.setItem('detectedCustomerLocation', JSON.stringify(point));
+                      setLocationSearchText(point.address);
+                      setCheckoutLocationStatus(`Delivery pin set to ${point.address}.`);
+                    }} /></div></Suspense>}
+                    {locationSuggestions.length > 0 && <div className="absolute left-4 right-4 top-full z-30 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">{locationSuggestions.map(place => <button key={place.place_id} type="button" onClick={() => {
+                      customLocationSelectionRef.current = true;
+                      const custom = { lat: Number(place.lat), lng: Number(place.lon), address: place.display_name, isCustom: true, collectionPointLabel: 'Custom delivery point' };
+                      setDetectedCustomerLocation(custom);
+                      detectedCustomerLocationRef.current = custom;
+                      localStorage.setItem('detectedCustomerLocation', JSON.stringify(custom));
+                      setLocationSearchText(place.display_name);
+                      setLocationSuggestions([]);
+                      setCheckoutLocationStatus(`Delivery pin set to ${place.display_name}.`);
+                    }} className="block w-full rounded-lg px-3 py-2 text-left text-[11px] leading-4 text-slate-700 hover:bg-slate-50">{place.display_name}</button>)}</div>}
+                    {detectedCustomerLocation?.address && <p className="mt-2 truncate text-[10px] text-slate-500" title={detectedCustomerLocation.address}>Selected: {detectedCustomerLocation.address}</p>}
                   </div>
 
                   <div>
@@ -1695,12 +1807,8 @@ export default function App() {
                 setLoginRestricted(false);
                 setAuthMessage('');
                 try {
-                  const account = await login(authEmail, adminPasswordInput);
-                  if (account.role !== 'admin') {
-                    logout();
-                    setLoginRestricted(true);
-                    setAuthMessage('Admin access is restricted. Please contact Rabi on WhatsApp for assistance.');
-                  }
+                  await loginAdmin(authEmail, adminPasswordInput);
+                  setHasActiveAdmin(true);
                 } catch (error) {
                   setAuthMessage(error.response?.data?.detail || 'Could not authenticate. Check your details and try again.');
                   setAuthError(true);
@@ -2201,7 +2309,7 @@ export default function App() {
       <footer className="mt-16 border-t border-rose-100 bg-white/90 px-4 py-9 text-xs text-slate-500">
         <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-2 lg:grid-cols-3">
           <div><p className="font-serif text-base font-bold text-slate-900">Rabi's Chic Fashion &amp; Campus Essentials</p><p className="mt-2 leading-5">Serving Casely Hayford, Valco, Oguaa, Adehye, and UCC halls with hostel delivery.</p><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="mt-3 inline-block font-bold text-slate-800">Instagram @rabischic â†—</a></div>
-          <div><p className="font-bold uppercase tracking-wider text-slate-800">Help</p><div className="mt-2 flex flex-col items-start gap-2"><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">FAQ</button><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">Shipping &amp; Returns</button><button onClick={() => navigateTo('/track')} className="min-h-9 hover:text-slate-900">Track Order</button></div></div>
+          <div><p className="font-bold uppercase tracking-wider text-slate-800">Help</p><div className="mt-2 flex flex-col items-start gap-2"><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">FAQ</button><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">Shipping &amp; Returns</button><button onClick={() => navigateTo('/track')} className="min-h-9 hover:text-slate-900">Track Order</button>{hasActiveAdmin === false && <a href="/rabis-admin-secure-2024" className="min-h-9 py-2 font-semibold text-slate-800 hover:text-black">Admin Sign In</a>}</div></div>
         <div><p className="font-bold uppercase tracking-wider text-slate-800">Get 10% off your first order</p><p className="mt-2 leading-5">Join the Rabiâ€™s Chic email list for new arrivals and store offers.</p>{newsletterDone ? <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 font-semibold text-emerald-800">Youâ€™re on the list. Use code CHIC10 at checkout.</p> : <form onSubmit={async event => { event.preventDefault(); try { const { data } = await api.post('/newsletter', { email: newsletterEmail }); setNewsletterDone(true); setCheckoutData(current => ({ ...current, email: current.email || newsletterEmail, couponCode: data.couponCode || 'CHIC10' })); } catch (error) { alert(error.response?.data?.detail || 'Could not subscribe. Please try again.'); } }} className="mt-3 flex gap-2"><input type="email" required value={newsletterEmail} onChange={event => setNewsletterEmail(event.target.value)} placeholder="Email address" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-xs" /><button className="min-h-11 shrink-0 rounded-xl bg-slate-950 px-3 text-xs font-bold text-white">Join</button></form>}</div>
         </div>
         <p className="mx-auto mt-8 max-w-6xl border-t border-slate-100 pt-4 text-center">Â© {new Date().getFullYear()} Rabi's Chic</p>

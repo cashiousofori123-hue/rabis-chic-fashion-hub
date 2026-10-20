@@ -10,7 +10,7 @@ import api from '../../api';
  * Tabs: [Password Login] | [Passkey Login (Face ID / Fingerprint)]
  */
 export default function AdminLogin({ onSuccess }) {
-  const { login, logout, user, role, adminUnlocked, loginWithAdminPasskey } = useAuth();
+  const { loginAdmin, user, role, adminUnlocked, loginWithAdminPasskey } = useAuth();
 
   const [tab,         setTab]        = useState('password'); // 'password' | 'passkey'
   const [email,       setEmail]      = useState('');
@@ -18,6 +18,7 @@ export default function AdminLogin({ onSuccess }) {
   const [busy,        setBusy]       = useState(false);
   const [msg,         setMsg]        = useState('');
   const [isError,     setIsError]    = useState(false);
+  const [activeOnAnotherDevice, setActiveOnAnotherDevice] = useState(false);
 
   // Passkey support detection
   const passkeySupported =
@@ -32,15 +33,11 @@ export default function AdminLogin({ onSuccess }) {
     e.preventDefault();
     setBusy(true); showMsg('');
     try {
-      const account = await login(email, password);
-      if (account.role !== 'admin') {
-        logout();
-        showMsg('Access denied. This portal is for administrators only.', true);
-        return;
-      }
+      await loginAdmin(email, password);
       showMsg('Admin signed in. Unlocking dashboard…');
       onSuccess?.();
     } catch (err) {
+      if (err.response?.headers?.['x-admin-session-active'] === 'true' || /already signed in on another phone/i.test(err.response?.data?.detail || '')) setActiveOnAnotherDevice(true);
       showMsg(err.response?.data?.detail || 'Wrong email or password.', true);
     } finally { setBusy(false); }
   };
@@ -62,6 +59,7 @@ export default function AdminLogin({ onSuccess }) {
       showMsg('Dashboard unlocked with passkey!');
       onSuccess?.();
     } catch (err) {
+      if (err.response?.headers?.['x-admin-session-active'] === 'true' || /already signed in on another phone/i.test(err.response?.data?.detail || '')) setActiveOnAnotherDevice(true);
       showMsg(err.response?.data?.detail || err.message || 'Passkey verification failed.', true);
     } finally { setBusy(false); }
   };
@@ -85,6 +83,7 @@ export default function AdminLogin({ onSuccess }) {
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      {activeOnAnotherDevice && <div className="fixed inset-0 z-[1000] grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true"><section className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl"><h2 className="text-lg font-bold text-slate-900">Admin already signed in</h2><p className="mt-2 text-sm text-slate-600">Admin already signed in on another phone. Only that phone can see the portal.</p><button type="button" onClick={() => setActiveOnAnotherDevice(false)} className="mt-5 w-full rounded-xl bg-slate-950 py-3 text-sm font-bold text-white">Close</button></section></div>}
       <div className="w-full max-w-sm space-y-6">
 
         {/* Logo */}

@@ -23,6 +23,10 @@
       "dest": "/index.html"
     },
     {
+      "src": "^/rabis-admin-secure-2024$",
+      "dest": "/index.html"
+    },
+    {
       "src": "^/admin-secret-login-rabis2024$",
       "dest": "/index.html"
     },

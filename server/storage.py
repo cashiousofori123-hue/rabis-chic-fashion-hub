@@ -68,7 +68,12 @@ def _connect():
                             payload jsonb NOT NULL,
                             updated_at timestamptz NOT NULL DEFAULT now()
                         );
+                        CREATE TABLE IF NOT EXISTS admin_sessions (
+                            session_slot integer PRIMARY KEY CHECK (session_slot = 1),
+                            payload jsonb NOT NULL
+                        );
                     """)
+                    cursor.execute("INSERT INTO admin_sessions (session_slot, payload) VALUES (1, '{}'::jsonb) ON CONFLICT (session_slot) DO NOTHING")
                     cursor.execute("SELECT count(*) FROM products")
                     if cursor.fetchone()[0] == 0:
                         from psycopg.types.json import Jsonb
@@ -335,4 +340,31 @@ def set_store_setting(key: str, value: Any) -> None:
             SET payload = EXCLUDED.payload, updated_at = now()
             """,
             (key, _json(value)),
+        )
+
+
+def get_admin_session() -> dict[str, Any]:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT payload FROM admin_sessions WHERE session_slot = 1")
+        row = cursor.fetchone()
+        return row[0] if row else {}
+
+
+def claim_admin_session(session: dict[str, Any], now_iso: str) -> tuple[bool, dict[str, Any]]:
+    """Atomically claim the single admin device slot, serializing concurrent logins."""
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT payload FROM admin_sessions WHERE session_slot = 1 FOR UPDATE")
+        row = cursor.fetchone()
+        current = row[0] if row else {}
+        if current.get("isActive") and current.get("expiresAt", "") > now_iso and current.get("deviceFingerprint") != session.get("deviceFingerprint"):
+            return False, current
+        cursor.execute("UPDATE admin_sessions SET payload = %s WHERE session_slot = 1", (_json(session),))
+        return True, session
+
+
+def set_admin_session(session: dict[str, Any]) -> None:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO admin_sessions (session_slot, payload) VALUES (1, %s) ON CONFLICT (session_slot) DO UPDATE SET payload = EXCLUDED.payload",
+            (_json(session),),
         )

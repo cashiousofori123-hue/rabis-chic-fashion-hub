@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getDeviceIdentity } from './utils/deviceIdentity';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:8000'),
@@ -10,6 +11,9 @@ api.interceptors.request.use((config) => {
     ? localStorage.getItem('rabi_access_token')
     : localStorage.getItem('rabi_admin_access_token') || localStorage.getItem('rabi_access_token');
   delete config.useRegularAuth;
+  const { deviceId, fingerprint } = getDeviceIdentity();
+  config.headers['X-Device-Fingerprint'] = fingerprint;
+  config.headers['X-Device-Id'] = deviceId;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
