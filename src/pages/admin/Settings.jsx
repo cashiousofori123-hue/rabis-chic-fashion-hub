@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 import AdminPageShell from './AdminPageShell';
@@ -7,12 +7,29 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
   const { logout, user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState('');
+  const [isError, setIsError] = useState(false);
 
-  const saveContact = (e) => {
+  useEffect(() => {
+    api.get('/store-contact').then(({ data }) => setAdminContact(data)).catch(() => {});
+  }, [setAdminContact]);
+
+  const saveContact = async (e) => {
     e.preventDefault();
-    localStorage.setItem('rabi_admin_contact', JSON.stringify(adminContact));
-    setMsg('Contact information saved.');
-    setTimeout(() => setMsg(''), 3000);
+    setSaving(true);
+    setMsg('');
+    setIsError(false);
+    try {
+      const { data } = await api.put('/store-contact', adminContact);
+      setAdminContact(data);
+      localStorage.setItem('rabi_admin_contact', JSON.stringify(data));
+      window.dispatchEvent(new Event('rabis:contact-updated'));
+      setMsg('Contact details saved and published for customers.');
+    } catch (error) {
+      setIsError(true);
+      setMsg(error.response?.data?.detail || 'Could not save contact details.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleTransfer = async (e) => {
@@ -38,20 +55,32 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
         <h3 className="font-serif font-bold text-xl text-slate-900">Contact Settings</h3>
         <div>
           <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Phone Number</label>
-          <input type="text" value={adminContact.phone}
+          <input type="tel" required minLength={8} maxLength={32} placeholder="e.g. +233 24 123 4567 or 0241234567" value={adminContact.phone}
             onChange={e => setAdminContact({ ...adminContact, phone: e.target.value })}
             className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white" />
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-600 uppercase mb-1">WhatsApp (e.g. 23324XXXXXXX)</label>
-          <input type="text" value={adminContact.whatsapp}
+          <input type="tel" required minLength={8} maxLength={32} placeholder="Include country code, or enter a Ghana number" value={adminContact.whatsapp}
             onChange={e => setAdminContact({ ...adminContact, whatsapp: e.target.value })}
             className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white" />
         </div>
-        {msg && <p role="status" className="text-xs text-emerald-700 font-semibold">{msg}</p>}
-        <button type="submit"
-          className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow transition">
-          Save Contact Information
+        <div>
+          <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Contact Email</label>
+          <input type="email" maxLength={254} value={adminContact.email || ''}
+            onChange={e => setAdminContact({ ...adminContact, email: e.target.value })}
+            className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Store Location</label>
+          <input type="text" maxLength={200} value={adminContact.location || ''}
+            onChange={e => setAdminContact({ ...adminContact, location: e.target.value })}
+            className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white" />
+        </div>
+        {msg && <p role={isError ? 'alert' : 'status'} className={`text-xs font-semibold ${isError ? 'text-rose-700' : 'text-emerald-700'}`}>{msg}</p>}
+        <button type="submit" disabled={saving}
+          className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow transition disabled:opacity-60">
+          {saving ? 'Saving…' : 'Save Contact Information'}
         </button>
       </form>
 

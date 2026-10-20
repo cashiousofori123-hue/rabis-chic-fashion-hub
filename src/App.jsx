@@ -3,6 +3,7 @@ import { Fingerprint, LogOut, ShieldCheck } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
 import { useAuth } from './context/AuthContext';
+import { telLink, whatsappLink } from './utils/contactLinks';
 const TrackOrder      = lazy(() => import('./components/TrackOrder'));
 const Overview        = lazy(() => import('./pages/admin/Overview'));
 const Products        = lazy(() => import('./pages/admin/Products'));
@@ -163,10 +164,9 @@ export default function App() {
 
   // Admin Contact Information State
   const [adminContact, setAdminContact] = useState(() => {
-    const saved = localStorage.getItem('rabi_admin_contact');
-    return saved ? JSON.parse(saved) : {
-      phone: '+233240000000',
-      whatsapp: '233240000000',
+    return {
+      phone: '',
+      whatsapp: '',
       email: 'contact@rabischic.com',
       location: 'University of Cape Coast (UCC), Cape Coast, Ghana'
     };
@@ -237,15 +237,22 @@ export default function App() {
     localStorage.setItem('rabi_admin_profile', JSON.stringify(adminProfile));
   }, [adminProfile]);
 
-  useEffect(() => {
-    localStorage.setItem('rabi_admin_contact', JSON.stringify(adminContact));
-  }, [adminContact]);
-
   const currentOrderProduct = products.find(p => p.id === Number(checkoutData.selectedProductId)) || products[0];
   const orderSubtotal = effectivePrice(currentOrderProduct) * checkoutData.quantity;
   const deliveryFees = { standard: 30, express: 60, outside: 80 };
   const orderDeliveryFee = deliveryFees[checkoutData.deliveryOption];
   const orderTotal = orderSubtotal + orderDeliveryFee;
+
+  useEffect(() => {
+    api.get('/store-contact')
+      .then(({ data }) => setAdminContact(data))
+      .catch(() => {});
+    const refreshContact = () => api.get('/store-contact')
+      .then(({ data }) => setAdminContact(data))
+      .catch(() => {});
+    window.addEventListener('rabis:contact-updated', refreshContact);
+    return () => window.removeEventListener('rabis:contact-updated', refreshContact);
+  }, []);
 
   useEffect(() => {
     const refreshProducts = () => api.get('/products').then(({ data }) => setProducts(data)).catch(() => {});
@@ -295,13 +302,34 @@ export default function App() {
 
   useEffect(() => {
     if (!adminUnlocked) return undefined;
-    const timeoutId = window.setTimeout(() => {
+    let timeoutId;
+    const expireUnlock = () => {
+      const expiresAt = Number(localStorage.getItem('rabi_admin_unlocked_until') || 0);
+      if (expiresAt > Date.now()) {
+        timeoutId = window.setTimeout(expireUnlock, expiresAt - Date.now());
+        return;
+      }
       lockAdmin();
-      window.history.replaceState({}, '', '/admin-secret-login-rabis2024');
-      setRoutePath('/admin-secret-login-rabis2024');
-      setPasskeyMessage('For your security, the admin dashboard locked after 15 minutes.');
-    }, 15 * 60 * 1000);
-    return () => window.clearTimeout(timeoutId);
+      if (window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin-secret-login-rabis2024') {
+        window.history.replaceState({}, '', '/admin-secret-login-rabis2024');
+        setRoutePath('/admin-secret-login-rabis2024');
+      }
+      setPasskeyMessage('For your security, admin access expires after 30 minutes. Sign in again to continue.');
+    };
+    const scheduleExpiry = () => {
+      window.clearTimeout(timeoutId);
+      const expiresAt = Number(localStorage.getItem('rabi_admin_unlocked_until') || 0);
+      timeoutId = window.setTimeout(expireUnlock, Math.max(0, expiresAt - Date.now()));
+    };
+    const syncAcrossTabs = (event) => {
+      if (event.key === 'rabi_admin_unlocked_until' || event.key === 'rabi_admin_access_token') scheduleExpiry();
+    };
+    scheduleExpiry();
+    window.addEventListener('storage', syncAcrossTabs);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener('storage', syncAcrossTabs);
+    };
   }, [adminUnlocked]);
 
   const validateGhanaPhone = (phoneNum) => {
@@ -595,6 +623,9 @@ export default function App() {
 
   const activeTrackingOrder = selectedOrderForTracking || orders[0];
   const publicHero = siteContent?.hero || {};
+  const adminPhoneHref = telLink(adminContact.phone);
+  const adminWhatsAppHref = whatsappLink(adminContact.whatsapp);
+  const adminWhatsAppMessageHref = whatsappLink(adminContact.whatsapp, 'Hello Rabi, I need clarification on my UCC hostel order.');
 
   if (routePath === '/admin-secret-login-rabis2024') {
     return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
@@ -690,23 +721,23 @@ export default function App() {
             </div>
 
             <div className="space-y-3">
-              <a 
-                href={`https://wa.me/${adminContact.whatsapp}?text=Hello%20Rabi,%20I%20need%20clarification%20on%20my%20UCC%20hostel%20order.`}
+              {adminWhatsAppMessageHref ? <a
+                href={adminWhatsAppMessageHref}
                 target="_blank" 
                 rel="noreferrer"
                 onClick={() => setShowCallModal(false)}
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2"
               >
                 <i className="fa-brands fa-whatsapp text-lg"></i> Chat on WhatsApp
-              </a>
+              </a> : <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">WhatsApp contact is not set yet. Please try the phone number below.</p>}
 
-              <a 
-                href={`tel:${adminContact.phone}`}
+              {adminPhoneHref ? <a
+                href={adminPhoneHref}
                 onClick={() => setShowCallModal(false)}
                 className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow-lg transition flex items-center justify-center gap-2"
               >
                 <i className="fa-solid fa-phone-volume text-sm"></i> Make Voice Call ({adminContact.phone})
-              </a>
+              </a> : <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">Phone support is not set up yet.</p>}
             </div>
 
             <button 
@@ -817,7 +848,7 @@ export default function App() {
                 onClick={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }}
                 className="px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
-                <i className="fa-solid fa-user-shield"></i> Visit Admin Dashboard
+                <i className="fa-solid fa-user-shield"></i> Admin Portal
               </button>
             )}
             {user && role !== 'admin' && (
@@ -1260,7 +1291,7 @@ export default function App() {
                   </div>
                   <div>
                     <span className="text-slate-400 block font-medium">Phone Support</span>
-                    <a href={`tel:${adminContact.phone}`} className="font-bold text-slate-900 text-sm">{adminContact.phone}</a>
+                    {adminPhoneHref ? <a href={adminPhoneHref} className="font-bold text-slate-900 text-sm">{adminContact.phone}</a> : <span className="text-slate-500">Not available yet</span>}
                   </div>
                 </div>
 
@@ -1270,7 +1301,7 @@ export default function App() {
                   </div>
                   <div>
                     <span className="text-slate-400 block font-medium">WhatsApp Support</span>
-                    <a href={`https://wa.me/${adminContact.whatsapp}`} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Chat on WhatsApp</a>
+                    {adminWhatsAppHref ? <a href={adminWhatsAppHref} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Chat on WhatsApp</a> : <span className="text-slate-500">Not available yet</span>}
                   </div>
                 </div>
 
@@ -1382,7 +1413,7 @@ export default function App() {
               {user ? (
                 <div className="space-y-4">
                   <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{role === 'rider' ? 'This area is restricted to administrators. Contact the store for assistance.' : 'This area is restricted to administrators. Please contact Rabi on WhatsApp for help.'}</p>
-                  <a href={`https://wa.me/${adminContact.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hello, I need help with access to Rabi’s Chic store.')}`} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>
+                  {whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.') && <a href={whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.')} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
                   <button onClick={() => { logout(); setAuthMessage(''); }} className="w-full rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white">Logout</button>
                 </div>
               ) : <form onSubmit={async (e) => {
@@ -1424,7 +1455,7 @@ export default function App() {
                 >
                   Sign in
                 </button>
-                {loginRestricted && <a href={`https://wa.me/${adminContact.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hello, I need help with access to Rabi’s Chic store.')}`} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
+                {loginRestricted && whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.') && <a href={whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.')} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
               </form>}
             </div>
           ) : (
@@ -1603,7 +1634,7 @@ export default function App() {
                                 </button>
                               )}
                               <a
-                                href={`https://wa.me/${order.phone.replace(/[^0-9]/g, '')}?text=Hello%20${order.customer},%20regarding%20your%20order%20${order.id}%20at%20UCC...`}
+                                href={whatsappLink(order.phone, `Hello ${order.customer}, regarding your order ${order.id} at UCC.`)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded-2xl transition flex items-center justify-center gap-1"
@@ -1654,7 +1685,7 @@ export default function App() {
 
                             <div className="flex justify-end gap-2">
                               <a
-                                href={`https://wa.me/${msg.phone.replace(/[^0-9]/g, '')}?text=Hello%20${msg.sender},%20responding%20to%20your%20inquiry...`}
+                                href={whatsappLink(msg.phone, `Hello ${msg.sender}, responding to your inquiry.`)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"

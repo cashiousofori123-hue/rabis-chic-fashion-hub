@@ -50,7 +50,7 @@ if os.getenv("VERCEL") and not storage.enabled():
 ADMIN_EMAIL = os.getenv("RABI_ADMIN_EMAIL", "").strip().lower()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_DAYS = 7
-ADMIN_UNLOCK_MINUTES = 15
+ADMIN_UNLOCK_MINUTES = 30
 WEBAUTHN_ALLOWED_ORIGINS = {
     origin.strip().rstrip("/")
     for origin in os.getenv(
@@ -228,11 +228,25 @@ class StoreProfileUpdate(BaseModel):
     avatar: str = Field(min_length=1, max_length=1_000_000)
 
 
+class StoreContactUpdate(BaseModel):
+    phone: str = Field(min_length=8, max_length=32)
+    whatsapp: str = Field(min_length=8, max_length=32)
+    email: str = Field(default="", max_length=254)
+    location: str = Field(default="", max_length=200)
+
+
 DEFAULT_STORE_PROFILE = {
     "name": "Rabi",
     "title": "Store Owner & Fashion Designer",
     "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
     "bio": "Passionate about bringing affordable, chic, and high-quality fashion trends directly to students across University of Cape Coast campus.",
+}
+
+DEFAULT_STORE_CONTACT = {
+    "phone": "",
+    "whatsapp": "",
+    "email": "contact@rabischic.com",
+    "location": "University of Cape Coast (UCC), Cape Coast, Ghana",
 }
 
 
@@ -442,6 +456,35 @@ def update_store_profile(
         storage.set_store_setting("profile", updated)
     else:
         write_data("profile.json", updated)
+    return updated
+
+
+@app.get("/store-contact")
+def get_store_contact() -> dict[str, Any]:
+    if storage.enabled():
+        return storage.get_store_setting("store_contact") or DEFAULT_STORE_CONTACT
+    return read_data("store_contact.json", DEFAULT_STORE_CONTACT)
+
+
+@app.put("/store-contact")
+def update_store_contact(
+    contact: StoreContactUpdate,
+    _: dict[str, Any] = Depends(get_current_admin),
+) -> dict[str, Any]:
+    updated = {
+        "phone": contact.phone.strip(),
+        "whatsapp": contact.whatsapp.strip(),
+        "email": contact.email.strip(),
+        "location": contact.location.strip(),
+    }
+    for field_name in ("phone", "whatsapp"):
+        digits = "".join(character for character in updated[field_name] if character.isdigit())
+        if not 8 <= len(digits) <= 15:
+            raise HTTPException(status_code=422, detail=f"Enter a valid international {field_name} number")
+    if storage.enabled():
+        storage.set_store_setting("store_contact", updated)
+    else:
+        write_data("store_contact.json", updated)
     return updated
 
 
