@@ -23,7 +23,10 @@ export default function AdminLayout({ adminProfile, orders = [], onNavigate, onL
             <img src={adminProfile?.avatar} alt="" className="h-11 w-11 rounded-xl object-cover" />
             <div><h1 className="font-serif text-lg font-bold text-slate-900">Rabis Chic Admin</h1><p className="text-xs text-slate-500">{user?.email}</p></div>
           </div>
-          <button onClick={() => { lockAdmin(); navigate('/admin-secret-login-rabis2024'); }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700"><Fingerprint className="mr-1 inline" size={15} /> Lock</button>
+          <div className="flex items-center gap-2">
+            <a href="/" target="_blank" rel="noreferrer" className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700">View Store ↗</a>
+            <button onClick={() => { lockAdmin(); navigate('/admin-secret-login-rabis2024'); }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700"><Fingerprint className="mr-1 inline" size={15} /> Lock</button>
+          </div>
         </header>
         <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-4">
           <aside className="space-y-2 rounded-3xl border border-white/80 bg-white/80 p-4 shadow-sm">
