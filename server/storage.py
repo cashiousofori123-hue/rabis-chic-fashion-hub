@@ -197,6 +197,18 @@ def update_product_price(product_id: int, price: float) -> dict[str, Any] | None
         return product
 
 
+def save_product(product: dict[str, Any]) -> dict[str, Any]:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE products SET payload = %s WHERE product_id = %s", (_json(product), int(product["id"])))
+    return product
+
+
+def delete_product(product_id: int) -> bool:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("DELETE FROM products WHERE product_id = %s", (product_id,))
+        return cursor.rowcount > 0
+
+
 def create_order(order: dict[str, Any]) -> None:
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute(

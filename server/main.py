@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import math
 import os
@@ -18,7 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -112,6 +113,10 @@ DEFAULT_PRODUCTS = [
     },
 ]
 
+for _default_product in DEFAULT_PRODUCTS:
+    _default_product.update(isDefault=True, status="in_stock", createdByAdmin=False)
+    _default_product.setdefault("images", [_default_product.get("mainImage", "")])
+
 
 def read_data(name: str, default: Any) -> Any:
     path = DATA_DIR / name
@@ -172,7 +177,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -198,6 +203,7 @@ class OrderRequest(BaseModel):
     quantity: int = Field(ge=1, le=10)
     deliveryOption: str = Field(pattern="^(standard|express|outside)$")
     paymentMethod: str = Field(default="MTN MoMo", max_length=30)
+    couponCode: str = Field(default="", max_length=20)
 
 
 class ContactMessageRequest(BaseModel):
@@ -208,6 +214,10 @@ class ContactMessageRequest(BaseModel):
 
 class PushSubscriptionRequest(BaseModel):
     subscription: dict[str, Any]
+
+
+class NewsletterRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _send_order_email(order: dict[str, Any], recipient: str, *, admin_notice: bool = False) -> bool:
@@ -335,6 +345,20 @@ def _save_contact_messages(messages: list[dict[str, Any]]) -> None:
         storage.set_store_setting("contact_messages", messages)
     else:
         write_data("contact_messages.json", messages)
+
+
+def _get_newsletter_emails() -> list[str]:
+    try:
+        return storage.get_store_setting("newsletter_emails") or [] if storage.enabled() else read_data("newsletter_emails.json", [])
+    except Exception:
+        return []
+
+
+def _save_newsletter_emails(emails: list[str]) -> None:
+    if storage.enabled():
+        storage.set_store_setting("newsletter_emails", emails)
+    else:
+        write_data("newsletter_emails.json", emails)
 
 
 def _send_contact_message_email(message_data: dict[str, Any]) -> bool:
@@ -908,17 +932,115 @@ def me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
 
 
 @app.get("/products")
-def get_products() -> list[dict[str, Any]]:
+def get_products(search: str = "") -> list[dict[str, Any]]:
     products = storage.list_products() if storage.enabled() else PRODUCTS
     content = storage.get_store_setting("site_content") if storage.enabled() else read_data("site_content.json", DEFAULT_SITE_CONTENT)
     overrides = {str(item.get("id")): item for item in (content or {}).get("products", [])}
-    return [{**product, **{key: value for key, value in overrides.get(str(product["id"]), {}).items() if key in {"name", "price", "discount", "mainImage"}}} for product in products]
+    default_ids = {int(item["id"]) for item in DEFAULT_PRODUCTS}
+    normalized = []
+    for product in products:
+        item = dict(product)
+        item.setdefault("isDefault", int(item.get("id", -1)) in default_ids)
+        item.setdefault("status", "in_stock")
+        item.setdefault("createdByAdmin", not item["isDefault"])
+        item.setdefault("images", [item.get("mainImage", "")] if item.get("mainImage") else [])
+        item.update({key: value for key, value in overrides.get(str(item["id"]), {}).items() if key in {"name", "price", "discount", "mainImage"}})
+        normalized.append(item)
+    # Keep the built-in catalog available as a fallback even if an older or
+    # partially migrated store has no persisted row for one of these products.
+    present_ids = {str(item.get("id")) for item in normalized}
+    for default in DEFAULT_PRODUCTS:
+        if str(default["id"]) not in present_ids:
+            normalized.append(dict(default))
+    normalized.sort(key=lambda item: (bool(item.get("isDefault")), -int(item.get("id", 0))))
+    query = search.strip().casefold()
+    if query:
+        normalized = [item for item in normalized if query in " ".join(str(item.get(field, "")) for field in ("name", "category", "description")).casefold()]
+    return normalized
+
+
+async def _read_product_input(request: Request, current: dict[str, Any] | None = None) -> dict[str, Any]:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid product details") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="Product details must be an object")
+        if "status" in payload and payload["status"] not in {"in_stock", "out_of_stock", "just_sold", "sold"}:
+            raise HTTPException(status_code=422, detail="Choose a valid product status")
+        if "price" in payload:
+            try:
+                payload["price"] = float(payload["price"])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="Enter a valid product price") from exc
+            if payload["price"] <= 0:
+                raise HTTPException(status_code=422, detail="Product price must be greater than zero")
+        if "name" in payload:
+            payload["name"] = str(payload["name"]).strip()
+            if not payload["name"]:
+                raise HTTPException(status_code=422, detail="Product name is required")
+        return payload
+
+    form = await request.form()
+    payload: dict[str, Any] = {
+        "name": str(form.get("name", current.get("name", "") if current else "")).strip(),
+        "category": str(form.get("category", current.get("category", "Dresses") if current else "Dresses")).strip(),
+        "description": str(form.get("description", current.get("description", "") if current else "")).strip(),
+        "status": str(form.get("status", current.get("status", "in_stock") if current else "in_stock")).strip(),
+    }
+    try:
+        payload["price"] = float(form.get("price", current.get("price", 0) if current else 0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Enter a valid product price") from exc
+    if not payload["name"] or payload["price"] <= 0:
+        raise HTTPException(status_code=422, detail="Product name and positive price are required")
+    if payload["status"] not in {"in_stock", "out_of_stock", "just_sold", "sold"}:
+        raise HTTPException(status_code=422, detail="Choose a valid product status")
+
+    existing_images = current.get("images", []) if current else []
+    if current and not existing_images and current.get("mainImage"):
+        existing_images = [current["mainImage"]]
+    if form.get("existingImages") is not None:
+        try:
+            existing_images = json.loads(str(form.get("existingImages")))
+            if not isinstance(existing_images, list) or any(not isinstance(url, str) for url in existing_images):
+                raise ValueError("Expected a list of image URLs")
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid image list") from exc
+    if current and current.get("isDefault") and current.get("mainImage") and current["mainImage"] not in existing_images:
+        existing_images = [current["mainImage"], *existing_images]
+
+    uploads = [entry for entry in form.getlist("images") if hasattr(entry, "read") and getattr(entry, "filename", None)]
+    if len(uploads) + len(existing_images) > 5:
+        raise HTTPException(status_code=413, detail="A product can have up to five photos")
+    new_images = []
+    total_upload_bytes = 0
+    for upload in uploads:
+        if upload.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise HTTPException(status_code=415, detail="Upload a JPEG, PNG or WebP photo")
+        raw = await upload.read(4 * 1024 * 1024 + 1)
+        total_upload_bytes += len(raw)
+        if len(raw) > 4 * 1024 * 1024 or total_upload_bytes > 4 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="The combined product photos must be 4 MB or smaller")
+        new_images.append(f"data:{upload.content_type};base64,{base64.b64encode(raw).decode('ascii')}")
+    images = existing_images + new_images
+    payload.update({
+        "images": images,
+        "mainImage": images[0] if images else (current or {}).get("mainImage", "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=600&q=80"),
+        "isDefault": False if current is None else bool(current.get("isDefault")),
+        "createdByAdmin": True if current is None else bool(current.get("createdByAdmin", not current.get("isDefault", False))),
+        "stock": 0 if payload["status"] in {"out_of_stock", "sold"} else max(1, int((current or {}).get("stock", 15) or 15)),
+        "rating": (current or {}).get("rating", 5.0),
+    })
+    return payload
 
 
 @app.post("/products")
-def create_product(product: dict[str, Any], _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
-    if not product.get("name") or float(product.get("price", 0)) <= 0:
-        raise HTTPException(status_code=422, detail="Product name and positive price are required")
+async def create_product(request: Request, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+    product = await _read_product_input(request)
+    product.update(isDefault=False, createdByAdmin=True, status=product.get("status", "in_stock"))
     if storage.enabled():
         return storage.create_product(product)
     with DATA_LOCK:
@@ -929,23 +1051,45 @@ def create_product(product: dict[str, Any], _: dict[str, Any] = Depends(get_curr
 
 
 @app.put("/products/{product_id}")
-def update_product(
+async def update_product(
     product_id: int,
-    update: PriceUpdate,
+    request: Request,
     _: dict[str, Any] = Depends(get_current_admin),
 ) -> dict[str, Any]:
     with DATA_LOCK:
+        current = storage.get_product(product_id) if storage.enabled() else next((entry for entry in PRODUCTS if int(entry["id"]) == product_id), None)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        update = await _read_product_input(request, current)
+        current.update(update)
+        # Product ownership flags are controlled by the server, never by a form payload.
+        is_default = bool(current.get("isDefault")) or product_id in {int(item["id"]) for item in DEFAULT_PRODUCTS}
+        current["isDefault"] = is_default
+        current["createdByAdmin"] = False if is_default else True
         if storage.enabled():
-            product = storage.update_product_price(product_id, update.price)
-            if product is None:
-                raise HTTPException(status_code=404, detail="Product not found")
-            return {"message": "Price updated", "product": product}
-        product = next((entry for entry in PRODUCTS if entry["id"] == product_id), None)
+            storage.save_product(current)
+        else:
+            index = next(i for i, entry in enumerate(PRODUCTS) if int(entry["id"]) == product_id)
+            PRODUCTS[index] = current
+            write_data("products.json", PRODUCTS)
+    return {"message": "Product updated", "product": current}
+
+
+@app.delete("/products/{product_id}")
+def delete_product(product_id: int, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, str]:
+    default_ids = {int(item["id"]) for item in DEFAULT_PRODUCTS}
+    with DATA_LOCK:
+        product = storage.get_product(product_id) if storage.enabled() else next((entry for entry in PRODUCTS if int(entry["id"]) == product_id), None)
         if product is None:
             raise HTTPException(status_code=404, detail="Product not found")
-        product["price"] = update.price
-        write_data("products.json", PRODUCTS)
-    return {"message": "Price updated", "product": product}
+        if product.get("isDefault") or product_id in default_ids:
+            raise HTTPException(status_code=403, detail="Default products cannot be deleted - protected")
+        if storage.enabled():
+            storage.delete_product(product_id)
+        else:
+            PRODUCTS[:] = [entry for entry in PRODUCTS if int(entry["id"]) != product_id]
+            write_data("products.json", PRODUCTS)
+    return {"message": "Product deleted"}
 
 
 @app.get("/users/pending")
@@ -1049,6 +1193,17 @@ def create_contact_message(request: ContactMessageRequest, background_tasks: Bac
     return message_data
 
 
+@app.post("/newsletter")
+def subscribe_newsletter(request: NewsletterRequest) -> dict[str, str]:
+    email = request.email.strip().lower()
+    with DATA_LOCK:
+        subscribers = _get_newsletter_emails()
+        if email not in subscribers:
+            subscribers.append(email)
+            _save_newsletter_emails(subscribers[-10000:])
+    return {"message": "Subscribed to Rabi's Chic updates", "couponCode": "CHIC10"}
+
+
 @app.get("/contact-messages")
 def list_contact_messages(_: dict[str, Any] = Depends(get_current_admin)) -> list[dict[str, Any]]:
     return _get_contact_messages()
@@ -1079,11 +1234,19 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
     product = storage.get_product(request.productId) if storage.enabled() else next((entry for entry in PRODUCTS if entry["id"] == request.productId), None)
     if product is None:
         raise HTTPException(status_code=422, detail="Choose an available catalog item")
+    if product.get("status") in {"out_of_stock", "sold"}:
+        raise HTTPException(status_code=409, detail="This product is currently unavailable")
     delivery_fees = {"standard": 30, "express": 60, "outside": 80}
     unit_price = round(float(product["price"]) * (100 - float(product.get("discount", 0))) / 100, 2)
     subtotal = round(unit_price * request.quantity, 2)
     delivery_fee = delivery_fees[request.deliveryOption]
-    total = round(subtotal + delivery_fee, 2)
+    coupon = request.couponCode.strip().upper()
+    discount_amount = 0.0
+    if coupon:
+        if coupon != "CHIC10" or request.email.strip().lower() not in _get_newsletter_emails():
+            raise HTTPException(status_code=422, detail="That coupon is invalid or is not linked to a subscribed email")
+        discount_amount = round(subtotal * 0.10, 2)
+    total = round(subtotal - discount_amount + delivery_fee, 2)
     order_id = f"RABI-{secrets.token_hex(16).upper()}"
     order = {
         **request.model_dump(),
@@ -1092,6 +1255,7 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
             "unitPrice": unit_price,
             "subtotal": subtotal,
             "deliveryFee": delivery_fee,
+            "discount": discount_amount,
             "total": total,
         },
         "id": order_id,
