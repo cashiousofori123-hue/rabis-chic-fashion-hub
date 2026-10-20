@@ -190,6 +190,8 @@ export default function App() {
   });
   const [adminOrderAlert, setAdminOrderAlert] = useState(null);
   const seenOrderIds = useRef(null);
+  const [adminMessageAlert, setAdminMessageAlert] = useState(null);
+  const seenMessageIds = useRef(null);
 
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState(null);
   const [messages, setMessages] = useState(() => {
@@ -362,7 +364,44 @@ export default function App() {
     if (isAdminAuthenticated) {
       api.get('/users/pending').then(({ data }) => setPendingUsers(data)).catch(() => setPendingUsers([]));
       api.get('/users/riders').then(({ data }) => setRiders(data)).catch(() => setRiders([]));
-      const refreshMessages = () => api.get('/contact-messages').then(({ data }) => setMessages(data)).catch(() => {});
+      const refreshMessages = () => api.get('/contact-messages').then(({ data }) => {
+        setMessages(data);
+        const latestIds = new Set(data.map(message => message.id));
+        if (seenMessageIds.current === null) {
+          seenMessageIds.current = latestIds;
+          return;
+        }
+        const newMessages = data.filter(message => !seenMessageIds.current.has(message.id));
+        latestIds.forEach(id => seenMessageIds.current.add(id));
+        if (newMessages.length) {
+          const newest = newMessages[0];
+          setAdminMessageAlert(newest);
+          if (localStorage.getItem('rabi_order_alerts_enabled') === 'true') {
+            try {
+              const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+              if (AudioContextClass) {
+                const audio = new AudioContextClass();
+                const oscillator = audio.createOscillator();
+                const gain = audio.createGain();
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(880, audio.currentTime);
+                oscillator.frequency.setValueAtTime(1175, audio.currentTime + 0.16);
+                gain.gain.setValueAtTime(0.001, audio.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.16, audio.currentTime + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.42);
+                oscillator.connect(gain);
+                gain.connect(audio.destination);
+                oscillator.start();
+                oscillator.stop(audio.currentTime + 0.43);
+                window.setTimeout(() => audio.close().catch(() => {}), 600);
+              }
+            } catch { /* Sound may be muted or unavailable. */ }
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('New customer message', { body: `${newest.sender}: ${newest.text}`, tag: newest.id });
+            }
+          }
+        }
+      }).catch(() => {});
       refreshMessages();
       messagesTimer = window.setInterval(refreshMessages, 12000);
     }
@@ -735,6 +774,12 @@ export default function App() {
             <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
           <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">×</button></div>
       </div>}
+      {adminMessageAlert && <div role="status" className="fixed right-4 top-24 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-violet-200 bg-white p-4 shadow-2xl">
+        <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700"><i className="fa-solid fa-message" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New customer message</p><p className="mt-1 text-xs text-slate-600">{adminMessageAlert.sender}: {adminMessageAlert.text}</p>
+            <button onClick={() => { setAdminMessageAlert(null); window.history.pushState({}, '', '/admin/messages'); setRoutePath('/admin/messages'); }} className="mt-2 text-xs font-bold text-violet-700">View message</button></div>
+          <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">×</button></div>
+      </div>}
       <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
         {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
           onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
@@ -751,6 +796,12 @@ export default function App() {
           <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} · {adminOrderAlert.items} · GH₵ {adminOrderAlert.amount}</p>
             <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
           <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">×</button></div>
+      </div>}
+      {isAdminAuthenticated && adminMessageAlert && <div role="status" className="fixed right-4 top-24 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-violet-200 bg-white p-4 shadow-2xl">
+        <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700"><i className="fa-solid fa-message" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New customer message</p><p className="mt-1 text-xs text-slate-600">{adminMessageAlert.sender}: {adminMessageAlert.text}</p>
+            <button onClick={() => { setAdminMessageAlert(null); window.history.pushState({}, '', '/admin/messages'); setRoutePath('/admin/messages'); }} className="mt-2 text-xs font-bold text-violet-700">View message</button></div>
+          <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">×</button></div>
       </div>}
 
       {/* PRODUCT DETAILS MODAL */}

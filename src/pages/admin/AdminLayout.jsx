@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Mail, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import api from '../../api';
+
+const decodeVapidKey = (key) => {
+  const padded = key + '='.repeat((4 - key.length % 4) % 4);
+  const raw = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, char => char.charCodeAt(0));
+};
 
 const GROUPS = [
   {
@@ -26,15 +33,37 @@ const GROUPS = [
 export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
   const { user } = useAuth();
   const [alertsEnabled, setAlertsEnabled] = useState(() => localStorage.getItem('rabi_order_alerts_enabled') === 'true');
+  const [alertSetupMessage, setAlertSetupMessage] = useState('');
   const email = user?.email || localStorage.getItem('rabi_user_email') || 'Admin account';
   const avatar = adminProfile?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(adminProfile?.name || email)}&background=e11d48&color=fff`;
 
   const enableOrderAlerts = async () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      await Notification.requestPermission();
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setAlertSetupMessage('This browser does not support background notifications.');
+      return;
     }
-    localStorage.setItem('rabi_order_alerts_enabled', 'true');
-    setAlertsEnabled(true);
+    const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== 'granted') {
+      setAlertSetupMessage('Allow notifications in your browser settings to receive admin alerts.');
+      return;
+    }
+    try {
+      const { data } = await api.get('/notifications/vapid-public-key');
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      if (data.publicKey) {
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(data.publicKey) });
+        await api.post('/notifications/subscribe', { subscription: subscription.toJSON() });
+        setAlertSetupMessage('Background alerts are enabled on this device.');
+      } else {
+        setAlertSetupMessage('Browser alerts are enabled while the site is open. Add VAPID keys in Vercel to enable alerts while using other apps.');
+      }
+      localStorage.setItem('rabi_order_alerts_enabled', 'true');
+      setAlertsEnabled(true);
+    } catch {
+      setAlertSetupMessage('Could not enable alerts. Please try again while signed in as admin.');
+      return;
+    }
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (AudioContextClass) {
@@ -88,8 +117,9 @@ export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
 
         <button type="button" onClick={enableOrderAlerts} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 p-4 text-sm font-bold text-white shadow-sm hover:bg-emerald-800">
           <span aria-hidden="true">{alertsEnabled ? '🔔' : '♬'}</span>
-          {alertsEnabled ? 'Order alerts enabled' : 'Enable order sound & notifications'}
+          {alertsEnabled ? 'Admin alerts enabled' : 'Enable admin alerts'}
         </button>
+        {alertSetupMessage && <p role="status" className="-mt-3 text-center text-xs text-slate-500">{alertSetupMessage}</p>}
 
         <button type="button" onClick={onLogout} className="flex w-full items-center justify-center gap-2 rounded-xl bg-white p-4 text-sm font-bold text-red-600 shadow-sm hover:bg-red-50">
           <LogOut size={17} /> Log Out

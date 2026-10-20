@@ -206,6 +206,10 @@ class ContactMessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+class PushSubscriptionRequest(BaseModel):
+    subscription: dict[str, Any]
+
+
 def _send_order_email(order: dict[str, Any], recipient: str, *, admin_notice: bool = False) -> bool:
     host = os.getenv("SMTP_HOST", "").strip()
     username = os.getenv("SMTP_USER", "").strip()
@@ -276,6 +280,50 @@ def _admin_notification_email() -> str:
     return ADMIN_EMAIL
 
 
+def _admin_push_subscriptions() -> list[dict[str, Any]]:
+    try:
+        return storage.get_store_setting("admin_push_subscriptions") or [] if storage.enabled() else read_data("admin_push_subscriptions.json", [])
+    except Exception:
+        return []
+
+
+def _save_admin_push_subscriptions(subscriptions: list[dict[str, Any]]) -> None:
+    if storage.enabled():
+        storage.set_store_setting("admin_push_subscriptions", subscriptions)
+    else:
+        write_data("admin_push_subscriptions.json", subscriptions)
+
+
+def _send_admin_push(title: str, body: str, url: str, tag: str) -> None:
+    public_key = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+    private_key = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+    subject = os.getenv("VAPID_SUBJECT", "mailto:admin@rabischic.com").strip()
+    if not public_key or not private_key:
+        return
+    try:
+        from pywebpush import WebPushException, webpush
+    except ImportError:
+        return
+    import json as json_module
+
+    payload = json_module.dumps({"title": title, "body": body, "url": url, "tag": tag})
+    subscriptions = _admin_push_subscriptions()
+    remaining = []
+    for subscription in subscriptions:
+        try:
+            webpush(subscription_info=subscription, data=payload, vapid_private_key=private_key,
+                    vapid_claims={"sub": subject}, timeout=8)
+            remaining.append(subscription)
+        except WebPushException as exc:
+            response = getattr(exc, "response", None)
+            if response is None or response.status_code not in (404, 410):
+                remaining.append(subscription)
+        except Exception:
+            remaining.append(subscription)
+    if len(remaining) != len(subscriptions):
+        _save_admin_push_subscriptions(remaining)
+
+
 def _get_contact_messages() -> list[dict[str, Any]]:
     if storage.enabled():
         return storage.get_store_setting("contact_messages") or []
@@ -302,8 +350,8 @@ def _send_contact_message_email(message_data: dict[str, Any]) -> bool:
     sender_phone = escape(str(message_data.get("phone", "")))
     note = escape(str(message_data.get("text", "")))
     subject = f"New customer note from {message_data.get('sender', 'Rabi’s Chic customer')}"
-    plain = f"New customer note\nFrom: {message_data.get('sender')}\nPhone: {message_data.get('phone')}\n\n{message_data.get('text')}\n\nOpen the admin dashboard: https://rabis-chic-fashion-hub.vercel.app/rabis-admin/messages"
-    html = f"<h2>New customer note</h2><p><b>From:</b> {sender_name}<br><b>Phone:</b> {sender_phone}</p><p>{note}</p><p><a href=\"https://rabis-chic-fashion-hub.vercel.app/rabis-admin/messages\">Open customer messages</a></p>"
+    plain = f"New customer note\nFrom: {message_data.get('sender')}\nPhone: {message_data.get('phone')}\n\n{message_data.get('text')}\n\nOpen the admin dashboard: https://rabis-chic-fashion-hub.vercel.app/admin/messages"
+    html = f"<h2>New customer note</h2><p><b>From:</b> {sender_name}<br><b>Phone:</b> {sender_phone}</p><p>{note}</p><p><a href=\"https://rabis-chic-fashion-hub.vercel.app/admin/messages\">Open customer messages</a></p>"
     email_message = EmailMessage()
     email_message["Subject"] = subject
     email_message["From"] = sender_address
@@ -323,6 +371,7 @@ def _deliver_contact_message_email(message_id: str) -> None:
     message_data = next((item for item in messages if item.get("id") == message_id), None)
     if not message_data:
         return
+    _send_admin_push("New customer message", f"{message_data.get('sender', 'Customer')}: {message_data.get('text', '')[:160]}", "/admin/messages", message_id)
     try:
         email_status = "sent" if _send_contact_message_email(message_data) else "not_configured"
     except (OSError, smtplib.SMTPException, ValueError):
@@ -375,6 +424,8 @@ def _deliver_order_notifications(order_id: str, customer_email: str) -> None:
             order = ORDERS.get(order_id)
     if not order:
         return
+
+    _send_admin_push("New Rabi's Chic order", f"{order.get('customer', 'Customer')} · {order.get('items', 'Order')} · GH₵ {order.get('amount', '')}", "/admin/orders", order_id)
 
     status = {"adminEmail": "not_configured", "customerEmail": "not_configured", "sms": "not_configured"}
     for key, recipient, is_admin in (
@@ -1001,6 +1052,26 @@ def create_contact_message(request: ContactMessageRequest, background_tasks: Bac
 @app.get("/contact-messages")
 def list_contact_messages(_: dict[str, Any] = Depends(get_current_admin)) -> list[dict[str, Any]]:
     return _get_contact_messages()
+
+
+@app.get("/notifications/vapid-public-key")
+def get_vapid_public_key() -> dict[str, str]:
+    return {"publicKey": os.getenv("VAPID_PUBLIC_KEY", "").strip()}
+
+
+@app.post("/notifications/subscribe")
+def save_admin_push_subscription(
+    request: PushSubscriptionRequest,
+    _: dict[str, Any] = Depends(get_current_admin),
+) -> dict[str, str]:
+    subscription = request.subscription
+    if not subscription.get("endpoint") or not subscription.get("keys", {}).get("p256dh") or not subscription.get("keys", {}).get("auth"):
+        raise HTTPException(status_code=422, detail="Invalid push subscription")
+    subscriptions = _admin_push_subscriptions()
+    subscriptions = [entry for entry in subscriptions if entry.get("endpoint") != subscription["endpoint"]]
+    subscriptions.append(subscription)
+    _save_admin_push_subscriptions(subscriptions[-20:])
+    return {"message": "Admin device notifications enabled"}
 
 
 @app.post("/orders")
