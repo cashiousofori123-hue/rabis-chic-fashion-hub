@@ -2,12 +2,12 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import api from '../api';
 
 const AuthContext = createContext(null);
-const ADMIN_UNLOCK_TIMEOUT_MS = 30 * 60 * 1000;
+const ADMIN_UNLOCK_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
 
 function hasValidAdminUnlock() {
   const expiresAt = Number(localStorage.getItem('rabi_admin_unlocked_until') || 0);
   const token = localStorage.getItem('rabi_admin_access_token');
-  if (token && expiresAt > Date.now()) return true;
+  if (token && (!expiresAt || expiresAt > Date.now())) return true;
   localStorage.removeItem('rabi_admin_access_token');
   localStorage.removeItem('rabi_admin_unlocked_until');
   return false;

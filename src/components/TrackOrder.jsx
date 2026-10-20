@@ -19,8 +19,8 @@ L.Icon.Default.mergeOptions({
 const SHOP_POINT = [5.1036, -1.2825];
 const DEFAULT_DESTINATION = [5.115, -1.288];
 const MAP_TILES = {
-  street: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  street: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  light: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
 };
 const WS_TIMEOUT_MS = 3000;
 
@@ -138,6 +138,14 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
   const [saved, setSaved] = useState(false);
   const [routeReversed, setRouteReversed] = useState(false);
   const [geocodedAddress, setGeocodedAddress] = useState('');
+  const [messageText, setMessageText] = useState('');
+  const [messageStatus, setMessageStatus] = useState('');
+  const [messageBusy, setMessageBusy] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [reviewDismissed, setReviewDismissed] = useState(false);
   const socketRef = useRef(null);
   const watchRef = useRef(null);
   const pollRef = useRef(null);
@@ -322,6 +330,27 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
     window.open(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${transportMode === 'walk' ? 'walking' : transportMode === 'bike' ? 'bicycling' : 'driving'}`, '_blank', 'noopener,noreferrer');
   };
 
+  const sendOrderMessage = async event => {
+    event.preventDefault();
+    if (!messageText.trim() || messageBusy) return;
+    setMessageBusy(true); setMessageStatus('');
+    try {
+      await api.post(`/orders/${encodeURIComponent(order.id)}/messages`, { sender: order.customer || 'Customer', phone: order.phone, text: messageText.trim() });
+      setMessageText(''); setMessageStatus('Message sent to the store.');
+    } catch (error) { setMessageStatus(error.response?.data?.detail || 'Could not send. Check the phone number used for this order.'); }
+    finally { setMessageBusy(false); }
+  };
+  const submitDeliveryReview = async event => {
+    event.preventDefault();
+    if (!reviewRating || reviewBusy) return;
+    setReviewBusy(true);
+    try {
+      await api.post(`/orders/${encodeURIComponent(order.id)}/review`, { phone: order.phone, rating: reviewRating, review: reviewText });
+      setReviewSubmitted(true);
+    } catch (error) { setMessageStatus(error.response?.data?.detail || 'Could not save the delivery rating.'); }
+    finally { setReviewBusy(false); }
+  };
+
   if (!order) return <main className="grid h-screen place-items-center bg-[#f3f6fc] px-6 text-center text-slate-600">Place or select an order to see its delivery map.</main>;
 
   const delivered = order.status?.toLowerCase().includes('delivered') || location?.status === 'Delivered' || Number(location?.progress) >= 100;
@@ -335,10 +364,10 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
         <MapContainer center={SHOP_POINT} zoom={14} className="h-full w-full" zoomControl={false} scrollWheelZoom>
           <FitMapOnce orderId={order.id} destination={destinationPoint} />
           <MapFocus position={customerLocation || riderPoint} mapType={() => setMapStyle(current => current === 'street' ? 'light' : 'street')} />
-          <TileLayer attribution="&copy; OpenStreetMap &copy; CARTO" url={MAP_TILES[mapStyle]} subdomains="abcd" />
+          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url={MAP_TILES[mapStyle]} subdomains="abc" />
           {routeLine.length > 1
-            ? <Polyline positions={routeLine} pathOptions={{ color: '#4285f4', weight: 7, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} />
-            : <Polyline positions={[routeStart, destinationPoint]} pathOptions={{ color: '#4285f4', weight: 6, opacity: 0.9, dashArray: '10 10' }} />}
+            ? <Polyline positions={routeLine} pathOptions={{ color: '#7c3aed', weight: 7, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} />
+            : <Polyline positions={[routeStart, destinationPoint]} pathOptions={{ color: '#7c3aed', weight: 6, opacity: 0.9, dashArray: '10 10' }} />}
           {!riderPoint && <Marker position={SHOP_POINT} icon={L.divIcon({ className: 'rabi-shop-marker', html: '<span style="display:flex;width:34px;height:34px;align-items:center;justify-content:center;border:2px solid white;border-radius:50%;background:#1a73e8;color:white;font-size:17px;box-shadow:0 2px 8px #0f172a55">⌂</span>', iconSize: [34, 34], iconAnchor: [17, 17] })} />}
           {customerLocation && <Marker position={customerLocation} icon={blueDotIcon} zIndexOffset={800} />}
           {riderPoint && <AnimatedRider position={riderPoint} />}
@@ -363,6 +392,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
           <div className="min-w-0 flex-1"><p className="text-[10px] leading-3 text-slate-400">Destination</p><p className="truncate text-sm font-medium text-slate-800">{destinationLabel}</p></div>
           <span className="mr-1 max-w-[95px] truncate text-[10px] text-slate-400">{geocodedAddress ? 'Address found' : order.room ? `Room ${order.room}` : ''}</span>
         </div>
+        {distanceKm < 0.1 && !delivered && <p className="ml-7 rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800">Approaching destination - rider nearby</p>}
         {menuOpen && <div className="absolute right-3 top-12 z-[900] w-56 rounded-xl border border-slate-100 bg-white p-2 shadow-xl">
           {canShare && orders.length > 1 && <label className="block px-2 py-2 text-xs font-semibold text-slate-500">Select delivery
             <select value={order.id} onChange={event => { onOrderChange?.(orders.find(entry => entry.id === event.target.value)); setMenuOpen(false); }} className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-800">
@@ -417,9 +447,12 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
           {(destinationError || gpsError) && <p role="status" className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-800">{destinationError || gpsError}</p>}
           {canShare ? <button type="button" onClick={toggleGpsSharing} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-700"><span className={`h-2 w-2 rounded-full ${sharing ? 'bg-emerald-500' : 'bg-slate-300'}`} />{sharing ? <Signal size={15} /> : <SignalZero size={15} />}{sharing ? 'Stop sharing courier GPS' : 'Share courier GPS'}</button>
             : <button type="button" onClick={shareDeliveryLocation} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-700"><LocateFixed size={15} />Share delivery address with courier</button>}
+          {!canShare && <form onSubmit={sendOrderMessage} className="mt-3 flex gap-2"><input value={messageText} onChange={event => setMessageText(event.target.value)} maxLength={1200} placeholder="Message the store about this order" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-xs"/><button disabled={!messageText.trim() || messageBusy} className="rounded-xl bg-slate-950 px-4 text-xs font-bold text-white disabled:opacity-40">Send</button></form>}
+          {messageStatus && <p role="status" className="mt-2 text-[11px] text-slate-600">{messageStatus}</p>}
           <div className="mt-3 flex items-center justify-between text-[10px] text-slate-400"><span>{orderAddress}</span><span className="inline-flex items-center gap-1"><Clock3 size={12} /> Updated live</span></div>
         </div>
       </section>
+      {delivered && !reviewDismissed && !order.rating && <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"><section role="dialog" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">{reviewSubmitted ? <><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl">✓</div><h2 className="mt-4 text-center text-xl font-black">Thanks for your review!</h2><p className="mt-2 text-center text-sm text-slate-500">Your delivery feedback was saved.</p><button onClick={() => setReviewDismissed(true)} className="mt-5 min-h-12 w-full rounded-full bg-slate-950 font-bold text-white">Close</button></> : <form onSubmit={submitDeliveryReview}><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl">✓</div><h2 className="mt-4 text-center text-xl font-black">Order Delivered Successfully</h2><p className="mt-2 text-center text-sm text-slate-500">Your order {order.id} arrived at {destinationLabel}.</p><p className="mt-5 text-center text-sm font-bold">Rate your delivery</p><div className="mt-2 flex justify-center gap-1">{[1, 2, 3, 4, 5].map(star => <button key={star} type="button" onClick={() => setReviewRating(star)} aria-label={`${star} stars`} className={`min-h-12 min-w-12 text-3xl ${star <= reviewRating ? 'text-amber-400' : 'text-slate-300'}`}>★</button>)}</div><textarea value={reviewText} onChange={event => setReviewText(event.target.value)} maxLength={1200} rows={3} placeholder="How was your delivery? (optional)" className="mt-3 w-full rounded-xl border border-slate-200 p-3 text-sm"/><button disabled={!reviewRating || reviewBusy} className="mt-3 min-h-12 w-full rounded-full bg-slate-950 font-bold text-white disabled:opacity-40">{reviewBusy ? 'Saving...' : 'Submit Rating'}</button><button type="button" onClick={() => setReviewDismissed(true)} className="mt-2 min-h-11 w-full text-sm text-slate-500">Maybe later</button></form>}</section></div>}
     </main>
   );
 }

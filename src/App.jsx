@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
+﻿import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Fingerprint, LogOut, ShieldCheck, Menu, X, Heart, ShoppingBag, Search as SearchIcon, UserRound, ChevronDown, HelpCircle } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
@@ -113,9 +113,9 @@ export default function App() {
     return () => window.removeEventListener('popstate', syncPath);
   }, []);
   useEffect(() => {
-    if (routePath.startsWith('/admin') && routePath !== '/admin-secret-login-rabis2024' && authReady && (!user || role !== 'admin')) {
-      window.history.replaceState({}, '', '/');
-      setRoutePath('/');
+    if (routePath.startsWith('/admin') && routePath !== '/admin-secret-login-rabis2024' && authReady && !user) {
+      window.history.replaceState({}, '', '/login');
+      setRoutePath('/login');
     }
   }, [routePath, authReady, user, role]);
 
@@ -198,6 +198,11 @@ export default function App() {
   });
   const [siteContent, setSiteContent] = useState(null);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  useEffect(() => {
+    if (slides.length < 2) return undefined;
+    const timer = window.setInterval(() => setCurrentSlideIndex(index => (index + 1) % slides.length), 4000);
+    return () => window.clearInterval(timer);
+  }, [slides.length]);
 
   // Orders & Messages State
   const [orders, setOrders] = useState(() => {
@@ -232,7 +237,7 @@ export default function App() {
     selectedProductId: 1,
     customItemName: '',
     quantity: 1,
-    deliveryOption: 'standard',
+    deliveryOption: 'ucc',
     paymentMethod: 'MTN MoMo',
     couponCode: ''
   });
@@ -271,7 +276,7 @@ export default function App() {
   const currentOrderProduct = products.find(p => p.id === Number(checkoutData.selectedProductId)) || products[0];
   const orderSubtotal = effectivePrice(currentOrderProduct) * checkoutData.quantity;
   const orderDiscount = checkoutData.couponCode.trim().toUpperCase() === 'CHIC10' ? Math.round(orderSubtotal * 0.1 * 100) / 100 : 0;
-  const deliveryFees = { standard: 30, express: 60, outside: 80 };
+  const deliveryFees = { ucc: 0, accra: 30, outside: 50 };
   const orderDeliveryFee = deliveryFees[checkoutData.deliveryOption];
   const orderTotal = orderSubtotal - orderDiscount + orderDeliveryFee;
 
@@ -322,9 +327,13 @@ export default function App() {
   useEffect(() => {
     const refreshContent = () => api.get('/site-content/homepage').then(({ data }) => {
       setSiteContent(data);
+      const managedSlides = Array.isArray(data?.heroSlides) ? data.heroSlides : [];
+      if (managedSlides.length) setSlides(managedSlides.map((slide, index) => ({ id: slide.id || `slide-${index}`, url: slide.imageUrl, title: slide.title, subtitle: slide.subtitle, badge: slide.badge, buttonText: slide.buttonText, buttonLink: slide.buttonLink })));
+      else {
       const banners = data?.featured?.bannerImages || [];
-      if (banners.length) setSlides(banners.map((url, index) => ({ id: `content-${index}`, url, title: data.hero?.title || 'Rabi’s Chic Collection' })));
-      else if (data?.hero?.imageUrl) setSlides([{ id: 'hero', url: data.hero.imageUrl, title: data.hero.title || 'Rabi’s Chic Collection' }]);
+      if (banners.length) setSlides(banners.map((url, index) => ({ id: `content-${index}`, url, title: data.hero?.title || 'Rabiâ€™s Chic Collection' })));
+      else if (data?.hero?.imageUrl) setSlides([{ id: 'hero', url: data.hero.imageUrl, title: data.hero.title || 'Rabiâ€™s Chic Collection' }]);
+      }
     }).catch(() => {});
     const syncContent = (event) => { if (event.key === 'rabis_content_updated_at') refreshContent(); };
     refreshContent();
@@ -375,8 +384,8 @@ export default function App() {
               }
             } catch { /* Browser sound may be muted or unavailable. */ }
             if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification('New Rabi’s Chic order', {
-                body: `${newest.customer} ordered ${newest.items}. Total GH₵ ${newest.amount}.`,
+              new Notification('New Rabiâ€™s Chic order', {
+                body: `${newest.customer} ordered ${newest.items}. Total GHâ‚µ ${newest.amount}.`,
                 tag: newest.id,
               });
             }
@@ -455,7 +464,7 @@ export default function App() {
         window.history.replaceState({}, '', '/rabis-admin');
         setRoutePath('/rabis-admin');
       }
-      setPasskeyMessage('For your security, admin access expires after 30 minutes. Sign in again to continue.');
+      setPasskeyMessage('Admin access expired. Sign in again to continue.');
     };
     const scheduleExpiry = () => {
       window.clearTimeout(timeoutId);
@@ -766,7 +775,8 @@ export default function App() {
       .some(value => value?.toLowerCase().includes(searchQuery.trim().toLowerCase())))
     : [];
 
-  const activeTrackingOrder = selectedOrderForTracking || orders[0];
+  const requestedTrackingId = new URLSearchParams(window.location.search).get('order');
+  const activeTrackingOrder = orders.find(order => String(order.id) === String(requestedTrackingId)) || selectedOrderForTracking || orders[0];
   const publicHero = siteContent?.hero || {};
   const adminPhoneHref = telLink(adminContact.phone);
   const adminWhatsAppHref = whatsappLink(adminContact.whatsapp);
@@ -804,7 +814,8 @@ export default function App() {
 
   if (routePath.startsWith('/admin')) {
     if (!authReady) return <div className="min-h-screen bg-rose-50/40" />;
-    if (!user || role !== 'admin') return null;
+    if (!user) return <Suspense fallback={<div className="min-h-screen bg-white" />}><AccountPage mode="login" onBack={() => navigateTo('/')} onNavigate={navigateTo} /></Suspense>;
+    if (role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><div className="mt-6 flex justify-center gap-2"><button onClick={() => navigateTo('/shop')} className="min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store</button><button onClick={() => navigateTo('/')} className="min-h-11 rounded-full border border-slate-300 px-5 text-sm font-bold">Go Home</button></div></section></main>;
     if (!adminUnlocked) return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
       <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
@@ -821,15 +832,15 @@ export default function App() {
     return <>
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
-          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} · {adminOrderAlert.items} · GH₵ {adminOrderAlert.amount}</p>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· GHâ‚µ {adminOrderAlert.amount}</p>
             <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
-          <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">×</button></div>
+          <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
       {adminMessageAlert && <div role="status" className="fixed right-4 top-24 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-violet-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700"><i className="fa-solid fa-message" /></span>
           <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New customer message</p><p className="mt-1 text-xs text-slate-600">{adminMessageAlert.sender}: {adminMessageAlert.text}</p>
             <button onClick={() => { setAdminMessageAlert(null); window.history.pushState({}, '', '/admin/messages'); setRoutePath('/admin/messages'); }} className="mt-2 text-xs font-bold text-violet-700">View message</button></div>
-          <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">×</button></div>
+          <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
       <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
         {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
@@ -850,15 +861,15 @@ export default function App() {
     <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
-          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} · {adminOrderAlert.items} · GH₵ {adminOrderAlert.amount}</p>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· GHâ‚µ {adminOrderAlert.amount}</p>
             <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
-          <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">×</button></div>
+          <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
       {isAdminAuthenticated && adminMessageAlert && <div role="status" className="fixed right-4 top-24 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-violet-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-700"><i className="fa-solid fa-message" /></span>
           <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New customer message</p><p className="mt-1 text-xs text-slate-600">{adminMessageAlert.sender}: {adminMessageAlert.text}</p>
             <button onClick={() => { setAdminMessageAlert(null); window.history.pushState({}, '', '/admin/messages'); setRoutePath('/admin/messages'); }} className="mt-2 text-xs font-bold text-violet-700">View message</button></div>
-          <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">×</button></div>
+          <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
 
       {/* PRODUCT DETAILS MODAL */}
@@ -884,13 +895,13 @@ export default function App() {
                   </span>
                   <h3 className="text-xl font-serif font-bold text-slate-900 mt-2">{selectedProductModal.name}</h3>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">{selectedProductModal.description}</p>
-                  <div className="mt-4 rounded-2xl bg-amber-50 p-3"><p className="text-xs font-bold text-slate-800">★★★★★ <span className="ml-1 text-slate-600">Customer favourite</span></p><p className="mt-1 text-[11px] leading-5 text-slate-600">Customers love the style and value. Ask us about fit before ordering.</p></div>
+                  <div className="mt-4 rounded-2xl bg-amber-50 p-3"><p className="text-xs font-bold text-slate-800">â˜…â˜…â˜…â˜…â˜… <span className="ml-1 text-slate-600">Customer favourite</span></p><p className="mt-1 text-[11px] leading-5 text-slate-600">Customers love the style and value. Ask us about fit before ordering.</p></div>
                 </div>
 
                 <div className="space-y-3 pt-3 border-t border-rose-100">
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400 font-bold uppercase">Price</span>
-                    <span className="text-2xl font-black text-slate-900">GH₵ {effectivePrice(selectedProductModal)}</span>
+                    <span className="text-2xl font-black text-slate-900">GHâ‚µ {effectivePrice(selectedProductModal)}</span>
                   </div>
                   <button 
                     onClick={() => {
@@ -912,7 +923,7 @@ export default function App() {
         </div>
       )}
 
-      {showSizeGuide && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[110] grid place-items-center bg-black/50 p-4" onMouseDown={event => { if (event.target === event.currentTarget) setShowSizeGuide(false); }}><section className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"><div className="flex items-center"><h2 className="flex-1 text-lg font-bold">Size Guide</h2><button onClick={() => setShowSizeGuide(false)} aria-label="Close size guide" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={18} /></button></div><p className="mt-2 text-xs leading-5 text-slate-600">Sizes vary by product. Measure around the fullest part of your bust and hips, and around your natural waist. Contact Rabi with your measurements for a fit recommendation.</p><div className="mt-4 grid grid-cols-4 gap-1 text-center text-[10px]">{[['Size','Bust','Waist','Hip'],['S','84–88 cm','66–70 cm','90–94 cm'],['M','89–94 cm','71–76 cm','95–100 cm'],['L','95–102 cm','77–84 cm','101–108 cm']].flatMap((row,index) => row.map((cell,column) => <span key={`${index}-${column}`} className={`rounded-lg p-2 ${index === 0 ? 'bg-slate-100 font-bold' : 'bg-white text-slate-700'}`}>{cell}</span>))}</div><p className="mt-3 text-[10px] text-slate-400">Approximate guide only; item measurements may vary.</p></section></div>}
+      {showSizeGuide && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[110] grid place-items-center bg-black/50 p-4" onMouseDown={event => { if (event.target === event.currentTarget) setShowSizeGuide(false); }}><section className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"><div className="flex items-center"><h2 className="flex-1 text-lg font-bold">Size Guide</h2><button onClick={() => setShowSizeGuide(false)} aria-label="Close size guide" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={18} /></button></div><p className="mt-2 text-xs leading-5 text-slate-600">Sizes vary by product. Measure around the fullest part of your bust and hips, and around your natural waist. Contact Rabi with your measurements for a fit recommendation.</p><div className="mt-4 grid grid-cols-4 gap-1 text-center text-[10px]">{[['Size','Bust','Waist','Hip'],['S','84â€“88 cm','66â€“70 cm','90â€“94 cm'],['M','89â€“94 cm','71â€“76 cm','95â€“100 cm'],['L','95â€“102 cm','77â€“84 cm','101â€“108 cm']].flatMap((row,index) => row.map((cell,column) => <span key={`${index}-${column}`} className={`rounded-lg p-2 ${index === 0 ? 'bg-slate-100 font-bold' : 'bg-white text-slate-700'}`}>{cell}</span>))}</div><p className="mt-3 text-[10px] text-slate-400">Approximate guide only; item measurements may vary.</p></section></div>}
 
       {/* CALL ADMIN MODAL SELECTOR */}
       {showCallModal && (
@@ -958,7 +969,7 @@ export default function App() {
 
       {/* NAVIGATION BAR */}
       <header className="bg-white/80 backdrop-blur-md border-b border-rose-100 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-7xl mx-auto px-3 py-2 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-4 min-h-14">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveView('store')}>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center font-serif font-bold text-xl shadow-md">
               R
@@ -970,7 +981,7 @@ export default function App() {
           </div>
 
           {/* SEARCH BAR */}
-          <div className="w-full sm:w-auto sm:flex-1 max-w-xs md:max-w-md order-3 sm:order-2">
+          <div className="w-full md:w-auto md:flex-1 max-w-none md:max-w-md order-3 md:order-2">
             <div className="relative">
               <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
               <input 
@@ -1004,58 +1015,58 @@ export default function App() {
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-rose-50"
                     >
                       <img src={optimizeProductImage(product.mainImage)} loading="lazy" alt="" className="h-11 w-9 rounded object-cover" />
-                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-900">{product.name}</span><span className="text-[10px] text-slate-500">{product.category} · GH₵ {product.price}</span></span>
+                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-900">{product.name}</span><span className="text-[10px] text-slate-500">{product.category} Â· GHâ‚µ {product.price}</span></span>
                     </button>
-                  )) : <p role="status" className="px-3 py-3 text-xs text-slate-500">No products match “{searchQuery.trim()}”.</p>}
+                  )) : <p role="status" className="px-3 py-3 text-xs text-slate-500">No products match â€œ{searchQuery.trim()}â€.</p>}
                 </div>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 md:gap-2 order-2 sm:order-3 overflow-x-auto max-w-full pb-1 sm:pb-0">
-            <button onClick={() => navigateTo('/')} className="hidden px-2.5 py-2 text-xs font-bold text-slate-700 hover:text-rose-600 lg:inline-flex">Home</button>
+          <div className="flex items-center gap-1 md:gap-2 order-2 md:order-3 max-w-full pb-0">
+            <button onClick={() => navigateTo('/')} className="hidden px-2.5 py-2 text-sm font-semibold text-slate-700 hover:text-slate-950 xl:inline-flex">Home</button>
             <button 
               onClick={() => navigateTo('/shop')}
-              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-rose-50 text-rose-700 hover:bg-rose-100'}`}
+              className={`hidden md:flex px-2.5 py-2 rounded-xl text-sm font-semibold transition items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'text-slate-950' : 'text-slate-600 hover:text-slate-950'}`}
             >
               <i className="fa-solid fa-bag-shopping"></i> Store
             </button>
 
             <button 
               onClick={() => navigateTo('/track')}
-              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'tracker' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+              className="hidden xl:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-map-location-dot"></i> Track Order
             </button>
 
             <button 
               onClick={() => navigateTo('/orders')}
-              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'lookup' ? 'bg-amber-600 text-white shadow-md shadow-amber-200' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+              className="hidden xl:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-magnifying-glass-chart"></i> Lookup
             </button>
 
             <button 
               onClick={() => navigateTo('/about')}
-              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'about' ? 'bg-pink-600 text-white shadow-md' : 'bg-pink-50 text-pink-700 hover:bg-pink-100'}`}
+              className="hidden lg:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-heart"></i> About
             </button>
 
             <button 
               onClick={() => navigateTo('/contact')}
-              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'contact' ? 'bg-purple-600 text-white shadow-md' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}
+              className="hidden lg:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-address-book"></i> Contact
             </button>
-            <button onClick={() => navigateTo('/faq')} className="hidden px-2.5 md:inline-flex py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"><HelpCircle size={14} /> FAQ</button>
+            <button onClick={() => navigateTo('/faq')} className="hidden xl:inline-flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950">FAQ</button>
 
-            <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-rose-50"><SearchIcon size={18} /></button>
-            <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-rose-600 hover:bg-rose-50"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-rose-600 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
+            <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="hidden md:grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><SearchIcon size={18} /></button>
+            <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="hidden md:grid relative h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
             <button onClick={() => { navigateTo('/shop'); window.setTimeout(() => document.getElementById('order-checkout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120); }} aria-label="Go to order checkout" title="Cart / checkout" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><ShoppingBag size={18} /><span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{checkoutData.quantity || 0}</span></button>
 
-            {!user ? <div className="hidden items-center gap-1 md:flex"><button onClick={() => navigateTo('/login')} className="rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-bold text-white">Sign Up</button></div>
-              : <div className="relative"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-rose-100 text-rose-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
+            {!user ? <div className="hidden items-center gap-1 md:flex"><button onClick={() => navigateTo('/login')} className="rounded-full px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Sign Up</button></div>
+              : <div className="relative hidden md:block"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-slate-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
                 {accountMenuOpen && <div className="absolute right-0 top-12 z-[90] w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-[11px] text-slate-500">{user.email}</p><button onClick={() => navigateTo('/orders')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">My Orders</button><button onClick={() => navigateTo('/wishlist')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">Wishlist</button>{isAdminAccount && <button onClick={() => navigateTo('/admin')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50">Admin Portal</button>}<button onClick={() => { logout(); navigateTo('/login'); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">Log Out</button></div>}
               </div>}
 
@@ -1065,26 +1076,28 @@ export default function App() {
             {isAdminAccount && (
               <button
                 onClick={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }}
-                className="px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
+                className="hidden xl:flex px-2.5 py-2 rounded-xl text-xs font-bold transition items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
                 <i className="fa-solid fa-user-shield"></i> Admin Portal
               </button>
             )}
           </div>
         </div>
-        {mobileMenuOpen && <nav className="border-t border-slate-100 bg-white px-4 py-3 md:hidden"><div className="grid grid-cols-2 gap-2">
+        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 shadow-2xl md:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">
           {[['Home','/'],['Store','/shop'],['Track Order','/track'],['My Orders','/orders'],['Wishlist','/wishlist'],['Search','/search'],['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => navigateTo(path)} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}
           {!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 px-3 text-left text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); navigateTo('/login'); }} className="min-h-11 rounded-xl bg-red-50 px-3 text-left text-sm font-bold text-red-700">Log Out</button>}
           {isAdminAccount && <button onClick={() => navigateTo('/admin')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Admin Portal</button>}
         </div></nav>}
       </header>
 
+      {siteContent?.noticeBar?.active && siteContent.noticeBar.text && <div role="status" className={`px-4 py-2 text-center text-xs font-semibold ${siteContent.noticeBar.type === 'sale' ? 'bg-black text-white' : siteContent.noticeBar.type === 'out_of_stock' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>{siteContent.noticeBar.text}</div>}
+
       {/* STORE VIEW */}
       {activeView === 'store' && (
         <main className="max-w-7xl mx-auto px-4 py-6 space-y-8 md:space-y-10">
 
           {/* HERO BANNER SLIDESHOW */}
-          <div className="relative w-full h-64 sm:h-80 md:h-96 rounded-3xl overflow-hidden shadow-xl bg-slate-900">
+          <div className="relative w-full h-64 sm:h-80 md:h-96 rounded-3xl overflow-hidden shadow-xl bg-slate-900" onTouchStart={event => { event.currentTarget.dataset.touchX = String(event.touches[0].clientX); }} onTouchEnd={event => { const start = Number(event.currentTarget.dataset.touchX); const dx = event.changedTouches[0].clientX - start; if (Math.abs(dx) > 45 && slides.length > 1) setCurrentSlideIndex(index => (index + (dx < 0 ? 1 : slides.length - 1)) % slides.length); }}>
             {slides.length > 0 && (
               <>
                 <img 
@@ -1094,12 +1107,12 @@ export default function App() {
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex flex-col justify-end p-5 md:p-8 text-white">
                   <span className="bg-rose-500 text-white text-[9px] md:text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider w-max mb-2">
-                    UCC Campus Exclusive
+                    {slides[currentSlideIndex]?.badge && slides[currentSlideIndex].badge !== 'None' ? slides[currentSlideIndex].badge : 'UCC Campus Exclusive'}
                   </span>
-                  <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight">{publicHero.title || slides[currentSlideIndex]?.title}</h2>
-                  <p className="text-xs md:text-sm text-rose-100 mt-1">{publicHero.subtitle || 'Fast UCC hostel delivery with real Google Maps live GPS tracking!'}</p>
-                  <a href={publicHero.ctaLink || '#store'} className="mt-4 inline-flex w-max items-center rounded-xl bg-rose-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-rose-600">
-                    {publicHero.ctaText || 'Shop Now'}
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight">{slides[currentSlideIndex]?.title || publicHero.title}</h2>
+                  <p className="text-xs md:text-sm text-rose-100 mt-1">{slides[currentSlideIndex]?.subtitle || publicHero.subtitle || 'Fast UCC hostel delivery with live GPS tracking.'}</p>
+                  <a href={slides[currentSlideIndex]?.buttonLink || publicHero.ctaLink || '#store'} className="mt-4 inline-flex w-max items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-slate-800">
+                    {slides[currentSlideIndex]?.buttonText || publicHero.ctaText || 'Shop Now'}
                   </a>
                 </div>
               </>
@@ -1116,6 +1129,7 @@ export default function App() {
             >
               <i className="fa-solid fa-chevron-right text-xs md:text-base"></i>
             </button>
+            {slides.length > 1 && <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2">{slides.map((slide, index) => <button key={slide.id} type="button" aria-label={`Show slide ${index + 1}`} onClick={() => setCurrentSlideIndex(index)} className={`h-2 rounded-full transition-all ${index === currentSlideIndex ? 'w-6 bg-white' : 'w-2 bg-white/60'}`} />)}</div>}
           </div>
 
           {/* CATEGORIES */}
@@ -1132,7 +1146,7 @@ export default function App() {
                   onClick={() => setSelectedCategory(cat)}
                   className={`px-4 md:px-5 py-2 md:py-2.5 rounded-2xl text-xs font-bold transition flex-shrink-0 ${selectedCategory === cat ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'bg-white text-slate-600 border border-rose-100 hover:bg-rose-50'}`}
                 >
-                  {cat === 'All' ? '✨ All Products' : cat}
+                  {cat === 'All' ? 'âœ¨ All Products' : cat}
                 </button>
               ))}
             </div>
@@ -1144,7 +1158,7 @@ export default function App() {
               {siteContent.featured.productIds.map(id => products.find(item => String(item.id) === String(id))).filter(Boolean).map(product => <button key={product.id} onClick={() => setSelectedProductModal(product)} className="overflow-hidden rounded-2xl border border-rose-100 bg-white text-left shadow-sm">
                 <img src={optimizeProductImage(product.mainImage)} alt={product.name} className="h-36 w-full object-cover" />
                 <span className="block truncate px-3 pt-2 text-xs font-bold text-slate-900">{product.name}</span>
-                <span className="block px-3 pb-3 text-xs text-rose-700">GH₵ {effectivePrice(product)}</span>
+                <span className="block px-3 pb-3 text-xs text-rose-700">GHâ‚µ {effectivePrice(product)}</span>
               </button>)}
             </div>
           </section>}
@@ -1164,7 +1178,7 @@ export default function App() {
                     {product.status && product.status !== 'in_stock' && <span className={`absolute left-14 top-3 rounded-full px-2.5 py-1 text-[10px] font-bold ${product.status === 'just_sold' ? 'bg-orange-100 text-orange-800' : product.status === 'out_of_stock' ? 'bg-slate-200 text-slate-700' : 'bg-red-100 text-red-800'}`}>{product.status === 'just_sold' ? 'Just Sold' : product.status === 'out_of_stock' ? 'Out of Stock' : 'Sold Out'}</span>}
                     {['out_of_stock','sold'].includes(product.status) && <span className="absolute inset-0 flex items-center justify-center bg-slate-900/20 text-sm font-black uppercase tracking-widest text-white">Unavailable</span>}
                     <span className="absolute right-3 top-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-rose-600">
-                      ★ {product.rating}
+                      â˜… {product.rating}
                     </span>
                   </div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg">
@@ -1177,8 +1191,8 @@ export default function App() {
                 <div className="mt-4 pt-3 border-t border-rose-50 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] text-slate-400 font-medium block">Price</span>
-                    <div className="text-base md:text-lg font-black text-slate-900">GH₵ {effectivePrice(product)}</div>
-                    {Number(product.discount) > 0 && <div className="text-[10px] text-slate-500"><span className="line-through">GH₵ {product.price}</span> · {product.discount}% off</div>}
+                    <div className="text-base md:text-lg font-black text-slate-900">GHâ‚µ {effectivePrice(product)}</div>
+                    {Number(product.discount) > 0 && <div className="text-[10px] text-slate-500"><span className="line-through">GHâ‚µ {product.price}</span> Â· {product.discount}% off</div>}
                   </div>
                   <button 
                     disabled={['out_of_stock','sold'].includes(product.status)}
@@ -1228,7 +1242,7 @@ export default function App() {
                       className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500 mb-2"
                     >
                       {products.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} — GH₵ {p.price}</option>
+                        <option key={p.id} value={p.id}>{p.name} â€” GHâ‚µ {p.price}</option>
                       ))}
                     </select>
 
@@ -1306,23 +1320,25 @@ export default function App() {
                       onChange={(e) => setCheckoutData({ ...checkoutData, email: e.target.value })}
                       className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm focus:outline-none focus:border-rose-500"
                     />
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">We’ll email your invoice and order confirmation here.</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Weâ€™ll email your invoice and order confirmation here.</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Delivery option</label>
-                      <select value={checkoutData.deliveryOption} onChange={(e) => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
-                        <option value="standard">Standard Accra · GH₵ 30</option>
-                        <option value="express">Express · GH₵ 60</option>
-                        <option value="outside">Outside Accra · GH₵ 80</option>
+                      <select value={checkoutData.deliveryOption} onChange={(e) => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value, ...(e.target.value !== 'ucc' && checkoutData.paymentMethod === 'Cash on Delivery' ? { paymentMethod: 'MTN MoMo' } : {}) })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
+                        <option value="ucc">UCC Campus Same Day · Free</option>
+                        <option value="accra">Accra · 1-2 Days · GHS 30</option>
+                        <option value="outside">Outside Accra · 2-3 Days · GHS 50</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Payment</label>
-                      <select value={checkoutData.paymentMethod} onChange={(e) => setCheckoutData({ ...checkoutData, paymentMethod: e.target.value })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
-                        <option>MTN MoMo</option>
+                      <select value={checkoutData.paymentMethod} onChange={(e) => setCheckoutData({ ...checkoutData, paymentMethod: e.target.value, ...(e.target.value === 'Cash on Delivery' ? { deliveryOption: 'ucc' } : {}) })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
+                        <option value="MTN MoMo">MoMo (MTN / Telecel)</option>
+                        <option value="Cash on Delivery">Cash on Delivery (UCC campus)</option>
                       </select>
+                      {checkoutData.paymentMethod === 'Cash on Delivery' ? <p className="mt-2 rounded-xl bg-emerald-50 p-3 text-[11px] leading-5 text-emerald-800">Pay the rider when your order arrives on UCC campus.</p> : <div className="mt-2 rounded-xl bg-amber-50 p-3 text-[11px] leading-5 text-amber-900"><p>Pay to MoMo number <b>055 123 4567</b><br/>Account name: <b>Rabis Chic</b></p><a href={adminWhatsAppMessageHref} target="_blank" rel="noreferrer" className="mt-1 inline-flex font-bold underline">Send payment confirmation on WhatsApp</a></div>}
                     </div>
                   </div>
 
@@ -1360,17 +1376,17 @@ export default function App() {
                       </div>
                       <div className="flex justify-between text-slate-300">
                         <span>Subtotal:</span>
-                        <span className="font-mono text-white">GH₵ {orderSubtotal}</span>
+                        <span className="font-mono text-white">GHâ‚µ {orderSubtotal}</span>
                       </div>
                       <div className="flex justify-between text-slate-300">
                         <span>Delivery ({checkoutData.deliveryOption}):</span>
-                        <span className="font-mono text-white">GH₵ {orderDeliveryFee}</span>
+                        <span className="font-mono text-white">GHâ‚µ {orderDeliveryFee}</span>
                       </div>
-                      {orderDiscount > 0 && <div className="flex justify-between text-emerald-300"><span>CHIC10 discount:</span><span className="font-mono">− GH₵ {orderDiscount.toFixed(2)}</span></div>}
+                      {orderDiscount > 0 && <div className="flex justify-between text-emerald-300"><span>CHIC10 discount:</span><span className="font-mono">âˆ’ GHâ‚µ {orderDiscount.toFixed(2)}</span></div>}
                       <label className="block text-[10px] font-bold text-slate-300">Coupon code<input value={checkoutData.couponCode} onChange={event => setCheckoutData({ ...checkoutData, couponCode: event.target.value.toUpperCase() })} placeholder="CHIC10" className="mt-1 min-h-10 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 text-xs text-white placeholder:text-slate-400" /></label>
                       <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-sm">
                         <span className="font-bold text-rose-400">Total Amount:</span>
-                        <span className="text-lg font-black font-mono text-white">GH₵ {orderTotal}</span>
+                        <span className="text-lg font-black font-mono text-white">GHâ‚µ {orderTotal}</span>
                       </div>
                     </div>
                   </div>
@@ -1394,11 +1410,11 @@ export default function App() {
                 <div>
                   <h4 className="font-serif font-bold text-lg text-emerald-900">Order Submitted Successfully!</h4>
                   <p className="text-xs text-emerald-700 mt-1">Your order has been sent to Rabi's admin dashboard. Once approved, the live Google Maps map will track your delivery.</p>
-                  <p className="text-xs text-emerald-700 mt-1">Order {selectedOrderForTracking?.id} · Invoice email: {selectedOrderForTracking?.notificationStatus?.customerEmail === 'sent' ? 'sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'queued' ? 'being sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'failed' ? 'could not be sent' : 'email service needs setup'}</p>
+                  <p className="text-xs text-emerald-700 mt-1">Order {selectedOrderForTracking?.id} Â· Invoice email: {selectedOrderForTracking?.notificationStatus?.customerEmail === 'sent' ? 'sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'queued' ? 'being sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'failed' ? 'could not be sent' : 'email service needs setup'}</p>
                   {selectedOrderForTracking?.invoice && <div className="mx-auto max-w-md rounded-2xl border border-emerald-200 bg-white p-4 text-left text-xs text-slate-700">
                     <p className="font-bold text-slate-900">Invoice for {selectedOrderForTracking.items}</p>
-                    <p className="mt-1">Quantity: {selectedOrderForTracking.quantity} · Delivery: GH₵ {selectedOrderForTracking.invoice.deliveryFee}</p>
-                    <p className="mt-1 font-black text-emerald-800">Total: GH₵ {selectedOrderForTracking.invoice.total}</p>
+                    <p className="mt-1">Quantity: {selectedOrderForTracking.quantity} Â· Delivery: GHâ‚µ {selectedOrderForTracking.invoice.deliveryFee}</p>
+                    <p className="mt-1 font-black text-emerald-800">Total: GHâ‚µ {selectedOrderForTracking.invoice.total}</p>
                     <p className="mt-1 text-slate-500">A copy will be sent to {selectedOrderForTracking.email} by email.</p>
                   </div>}
                 </div>
@@ -1421,7 +1437,7 @@ export default function App() {
           </div>
 
           <section className="space-y-4 rounded-3xl bg-white p-5 md:p-7">
-            <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-rose-500">Follow along</p><h3 className="mt-1 font-serif text-xl font-bold text-slate-900">Find us on Instagram</h3></div><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="text-xs font-bold text-slate-700">@rabischic ↗</a></div>
+            <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-rose-500">Follow along</p><h3 className="mt-1 font-serif text-xl font-bold text-slate-900">Find us on Instagram</h3></div><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="text-xs font-bold text-slate-700">@rabischic â†—</a></div>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{products.slice(0, 6).map(product => <button key={`social-${product.id}`} onClick={() => setSelectedProductModal(product)} className="aspect-square overflow-hidden rounded-xl bg-slate-100"><img src={optimizeProductImage(product.mainImage)} loading="lazy" alt={product.name} className="h-full w-full object-cover transition hover:scale-105" /></button>)}</div>
           </section>
         </main>
@@ -1478,9 +1494,9 @@ export default function App() {
                 </span>
               </div>
               <div className="space-y-2 text-xs text-slate-600">
-                <p>📦 <strong>Items:</strong> {lookupResult.items} (Qty: {lookupResult.quantity})</p>
-                <p>📍 <strong>Hostel Destination:</strong> {lookupResult.hostel} — Room: {lookupResult.room}</p>
-                <p>💰 <strong>Total Amount:</strong> GH₵ {lookupResult.amount}</p>
+                <p>ðŸ“¦ <strong>Items:</strong> {lookupResult.items} (Qty: {lookupResult.quantity})</p>
+                <p>ðŸ“ <strong>Hostel Destination:</strong> {lookupResult.hostel} â€” Room: {lookupResult.room}</p>
+                <p>ðŸ’° <strong>Total Amount:</strong> GHâ‚µ {lookupResult.amount}</p>
               </div>
               <button onClick={() => { setSelectedOrderForTracking(lookupResult); setActiveView('tracker'); }} className="rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white">
                 <i className="fa-solid fa-map-location-dot mr-2"></i>Track delivery
@@ -1641,13 +1657,13 @@ export default function App() {
                 <h2 className="font-serif text-2xl font-bold text-slate-900">Unlock admin dashboard</h2>
                 <p className="mt-2 text-sm text-slate-600">Signed in as {user.email}. Verify with this device to continue.</p>
               </div>
-              {adminPasskeys.length > 0 && <button onClick={unlockAdminWithPasskey} disabled={passkeyBusy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3.5 text-sm font-bold text-white disabled:opacity-60"><Fingerprint size={19} />{passkeyBusy ? 'Waiting for device…' : 'Use Face ID, fingerprint, or device PIN'}</button>}
+              {adminPasskeys.length > 0 && <button onClick={unlockAdminWithPasskey} disabled={passkeyBusy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3.5 text-sm font-bold text-white disabled:opacity-60"><Fingerprint size={19} />{passkeyBusy ? 'Waiting for deviceâ€¦' : 'Use Face ID, fingerprint, or device PIN'}</button>}
               {adminPasskeys.length === 0 && <p className="rounded-xl bg-amber-50 p-3 text-left text-xs text-amber-900">No device passkey is registered yet. Unlock with your admin password, then set one up in Security.</p>}
               <details className="rounded-xl border border-slate-200 p-3 text-left">
                 <summary className="cursor-pointer text-sm font-semibold text-slate-700">Use admin password instead</summary>
                 <form onSubmit={unlockAdminWithPassword} className="mt-3 space-y-3">
                   <input type="password" required autoComplete="current-password" value={unlockPassword} onChange={(event) => setUnlockPassword(event.target.value)} placeholder="Admin password" className="w-full rounded-lg border border-rose-200 px-3 py-2.5 text-sm" />
-                  <button type="submit" disabled={passkeyBusy} className="w-full rounded-lg bg-rose-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{passkeyBusy ? 'Verifying…' : 'Unlock with password'}</button>
+                  <button type="submit" disabled={passkeyBusy} className="w-full rounded-lg bg-rose-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{passkeyBusy ? 'Verifyingâ€¦' : 'Unlock with password'}</button>
                 </form>
               </details>
               {passkeyMessage && <p role="status" className="text-xs text-slate-600">{passkeyMessage}</p>}
@@ -1666,7 +1682,7 @@ export default function App() {
               {user ? (
                 <div className="space-y-4">
                   <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{role === 'rider' ? 'This area is restricted to administrators. Contact the store for assistance.' : 'This area is restricted to administrators. Please contact Rabi on WhatsApp for help.'}</p>
-                  {whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.') && <a href={whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.')} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
+                  {whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabiâ€™s Chic store.') && <a href={whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabiâ€™s Chic store.')} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
                   <button onClick={() => { logout(); setAuthMessage(''); }} className="w-full rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white">Logout</button>
                 </div>
               ) : <form onSubmit={async (e) => {
@@ -1708,7 +1724,7 @@ export default function App() {
                 >
                   Sign in
                 </button>
-                {loginRestricted && whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.') && <a href={whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabi’s Chic store.')} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
+                {loginRestricted && whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabiâ€™s Chic store.') && <a href={whatsappLink(adminContact.whatsapp, 'Hello, I need help with access to Rabiâ€™s Chic store.')} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
               </form>}
             </div>
           ) : (
@@ -1859,10 +1875,10 @@ export default function App() {
                                 <span className="text-xs text-slate-400">({order.phone})</span>
                               </div>
                               <p className="text-xs text-slate-700 font-medium">
-                                📦 <strong className="text-slate-900">{order.items}</strong> (Qty: {order.quantity}) — Total: <strong className="text-rose-600">GH₵ {order.amount}</strong>
+                                ðŸ“¦ <strong className="text-slate-900">{order.items}</strong> (Qty: {order.quantity}) â€” Total: <strong className="text-rose-600">GHâ‚µ {order.amount}</strong>
                               </p>
                               <p className="text-[11px] text-slate-500">
-                                📍 Hostel Location: <strong className="text-slate-800">{order.hostel} — Room: {order.room}</strong>
+                                ðŸ“ Hostel Location: <strong className="text-slate-800">{order.hostel} â€” Room: {order.room}</strong>
                               </p>
                               <div className="inline-block mt-1">
                                 <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${order.status.includes('Approved') || order.status.includes('Transit') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
@@ -1972,7 +1988,7 @@ export default function App() {
                         <input 
                           type="number"
                           required
-                          placeholder="Price (GH₵)..."
+                          placeholder="Price (GHâ‚µ)..."
                           value={newProdPrice}
                           onChange={(e) => setNewProdPrice(e.target.value)}
                           className="px-4 py-2.5 rounded-xl border border-rose-200 text-xs font-bold bg-white"
@@ -2023,7 +2039,7 @@ export default function App() {
                               <span className="text-xs font-bold text-slate-800 line-clamp-1">{p.name}</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-xs text-slate-400 font-bold">GH₵</span>
+                              <span className="text-xs text-slate-400 font-bold">GHâ‚µ</span>
                               <input 
                                 type="number"
                                 value={p.price}
@@ -2068,7 +2084,7 @@ export default function App() {
                       <textarea id="profile-bio" rows="4" maxLength={1200} value={adminProfile.bio} onChange={(event) => setAdminProfile({ ...adminProfile, bio: event.target.value })} className="w-full rounded-xl border border-rose-200 px-4 py-3 text-sm" />
                     </div>
                     {profileMessage && <p role="status" className="text-xs text-slate-600">{profileMessage}</p>}
-                    <button type="submit" disabled={profileSaving} className="rounded-xl bg-slate-900 px-5 py-3 text-xs font-bold text-white disabled:opacity-60">{profileSaving ? 'Saving…' : 'Save and publish profile'}</button>
+                    <button type="submit" disabled={profileSaving} className="rounded-xl bg-slate-900 px-5 py-3 text-xs font-bold text-white disabled:opacity-60">{profileSaving ? 'Savingâ€¦' : 'Save and publish profile'}</button>
                   </form>
                 )}
 
@@ -2119,9 +2135,9 @@ export default function App() {
                       {adminPasskeys.length > 0 ? (
                         <div className="space-y-2">
                           {adminPasskeys.map(passkey => <p key={passkey.id} className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900"><ShieldCheck size={14} className="mr-2 inline" />{passkey.label} registered</p>)}
-                          <button onClick={registerAdminPasskey} disabled={passkeyBusy} className="rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 disabled:opacity-60">{passkeyBusy ? 'Waiting for device…' : 'Add another passkey'}</button>
+                          <button onClick={registerAdminPasskey} disabled={passkeyBusy} className="rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 disabled:opacity-60">{passkeyBusy ? 'Waiting for deviceâ€¦' : 'Add another passkey'}</button>
                         </div>
-                      ) : <button onClick={registerAdminPasskey} disabled={passkeyBusy} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white disabled:opacity-60"><Fingerprint size={17} />{passkeyBusy ? 'Waiting for device…' : 'Set up this device'}</button>}
+                      ) : <button onClick={registerAdminPasskey} disabled={passkeyBusy} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white disabled:opacity-60"><Fingerprint size={17} />{passkeyBusy ? 'Waiting for deviceâ€¦' : 'Set up this device'}</button>}
                       {passkeyMessage && <p role="status" className="text-xs text-slate-600">{passkeyMessage}</p>}
                     </section>
 
@@ -2177,11 +2193,11 @@ export default function App() {
       {/* FOOTER */}
       <footer className="mt-16 border-t border-rose-100 bg-white/90 px-4 py-9 text-xs text-slate-500">
         <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-2 lg:grid-cols-3">
-          <div><p className="font-serif text-base font-bold text-slate-900">Rabi's Chic Fashion &amp; Campus Essentials</p><p className="mt-2 leading-5">Serving Casely Hayford, Valco, Oguaa, Adehye, and UCC halls with hostel delivery.</p><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="mt-3 inline-block font-bold text-slate-800">Instagram @rabischic ↗</a></div>
+          <div><p className="font-serif text-base font-bold text-slate-900">Rabi's Chic Fashion &amp; Campus Essentials</p><p className="mt-2 leading-5">Serving Casely Hayford, Valco, Oguaa, Adehye, and UCC halls with hostel delivery.</p><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="mt-3 inline-block font-bold text-slate-800">Instagram @rabischic â†—</a></div>
           <div><p className="font-bold uppercase tracking-wider text-slate-800">Help</p><div className="mt-2 flex flex-col items-start gap-2"><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">FAQ</button><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">Shipping &amp; Returns</button><button onClick={() => navigateTo('/track')} className="min-h-9 hover:text-slate-900">Track Order</button></div></div>
-        <div><p className="font-bold uppercase tracking-wider text-slate-800">Get 10% off your first order</p><p className="mt-2 leading-5">Join the Rabi’s Chic email list for new arrivals and store offers.</p>{newsletterDone ? <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 font-semibold text-emerald-800">You’re on the list. Use code CHIC10 at checkout.</p> : <form onSubmit={async event => { event.preventDefault(); try { const { data } = await api.post('/newsletter', { email: newsletterEmail }); setNewsletterDone(true); setCheckoutData(current => ({ ...current, email: current.email || newsletterEmail, couponCode: data.couponCode || 'CHIC10' })); } catch (error) { alert(error.response?.data?.detail || 'Could not subscribe. Please try again.'); } }} className="mt-3 flex gap-2"><input type="email" required value={newsletterEmail} onChange={event => setNewsletterEmail(event.target.value)} placeholder="Email address" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-xs" /><button className="min-h-11 shrink-0 rounded-xl bg-slate-950 px-3 text-xs font-bold text-white">Join</button></form>}</div>
+        <div><p className="font-bold uppercase tracking-wider text-slate-800">Get 10% off your first order</p><p className="mt-2 leading-5">Join the Rabiâ€™s Chic email list for new arrivals and store offers.</p>{newsletterDone ? <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 font-semibold text-emerald-800">Youâ€™re on the list. Use code CHIC10 at checkout.</p> : <form onSubmit={async event => { event.preventDefault(); try { const { data } = await api.post('/newsletter', { email: newsletterEmail }); setNewsletterDone(true); setCheckoutData(current => ({ ...current, email: current.email || newsletterEmail, couponCode: data.couponCode || 'CHIC10' })); } catch (error) { alert(error.response?.data?.detail || 'Could not subscribe. Please try again.'); } }} className="mt-3 flex gap-2"><input type="email" required value={newsletterEmail} onChange={event => setNewsletterEmail(event.target.value)} placeholder="Email address" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-xs" /><button className="min-h-11 shrink-0 rounded-xl bg-slate-950 px-3 text-xs font-bold text-white">Join</button></form>}</div>
         </div>
-        <p className="mx-auto mt-8 max-w-6xl border-t border-slate-100 pt-4 text-center">© {new Date().getFullYear()} Rabi's Chic</p>
+        <p className="mx-auto mt-8 max-w-6xl border-t border-slate-100 pt-4 text-center">Â© {new Date().getFullYear()} Rabi's Chic</p>
       </footer>
 
       <Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} />

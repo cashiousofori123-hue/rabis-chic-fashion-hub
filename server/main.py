@@ -5,8 +5,10 @@ import base64
 import json
 import math
 import os
+import re
 import secrets
 import smtplib
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -56,8 +58,8 @@ if os.getenv("VERCEL") and not storage.enabled():
     raise RuntimeError("DATABASE_URL must be configured for persistent Vercel storage")
 ADMIN_EMAIL = os.getenv("RABI_ADMIN_EMAIL", "").strip().lower()
 ALGORITHM = "HS256"
-ACCESS_TOKEN_DAYS = 7
-ADMIN_UNLOCK_MINUTES = 30
+ACCESS_TOKEN_DAYS = 30
+ADMIN_UNLOCK_MINUTES = 30 * 24 * 60
 WEBAUTHN_ALLOWED_ORIGINS = {
     origin.strip().rstrip("/")
     for origin in os.getenv(
@@ -160,6 +162,9 @@ DEFAULT_SITE_CONTENT: dict[str, Any] = {
     "featured": {"productIds": [1, 2, 3, 4, 5, 6], "bannerImages": []},
 }
 
+_onupa_rate_log: dict[str, list[float]] = {}
+_order_message_rate_log: dict[str, list[float]] = {}
+
 
 app = FastAPI(title="Rabi's Chic Fashion Hub API")
 if os.getenv("VERCEL"):
@@ -201,8 +206,8 @@ class OrderRequest(BaseModel):
     items: str = Field(min_length=1, max_length=300)
     productId: int
     quantity: int = Field(ge=1, le=10)
-    deliveryOption: str = Field(pattern="^(standard|express|outside)$")
-    paymentMethod: str = Field(default="MTN MoMo", max_length=30)
+    deliveryOption: str = Field(pattern="^(ucc|accra|outside)$")
+    paymentMethod: str = Field(default="MTN MoMo", pattern="^(MTN MoMo|Cash on Delivery)$")
     couponCode: str = Field(default="", max_length=20)
 
 
@@ -210,6 +215,26 @@ class ContactMessageRequest(BaseModel):
     sender: str = Field(min_length=1, max_length=100)
     phone: str = Field(min_length=8, max_length=20)
     text: str = Field(min_length=1, max_length=2000)
+
+
+class OrderMessageRequest(BaseModel):
+    sender: str = Field(min_length=1, max_length=100)
+    phone: str = Field(min_length=8, max_length=20)
+    text: str = Field(min_length=1, max_length=1200)
+
+
+class OrderReviewRequest(BaseModel):
+    phone: str = Field(min_length=8, max_length=20)
+    rating: int = Field(ge=1, le=5)
+    review: str = Field(default="", max_length=1200)
+
+
+class OrderReplyRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1200)
+
+
+class OnupaChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
 
 
 class PushSubscriptionRequest(BaseModel):
@@ -421,7 +446,7 @@ def _distance_km(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> floa
 def _delivery_metrics(lat: float, lng: float, destination_lat: float, destination_lng: float) -> dict[str, Any]:
     remaining_km = _distance_km(lat, lng, destination_lat, destination_lng)
     route_km = _distance_km(*SHOP_COORDS, destination_lat, destination_lng)
-    delivered = remaining_km <= 0.05
+    delivered = remaining_km <= 0.02
     progress = 100 if delivered else 0 if route_km <= 0.05 else int(max(0, min(99, (1 - remaining_km / route_km) * 100)))
     eta = "Arriving now" if delivered else f"{max(1, math.ceil(remaining_km / 20 * 60))} mins"
     return {"progress": progress, "eta": eta, "status": "Delivered" if delivered else "On The Way", "distanceKm": round(remaining_km, 2)}
@@ -1236,7 +1261,9 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
         raise HTTPException(status_code=422, detail="Choose an available catalog item")
     if product.get("status") in {"out_of_stock", "sold"}:
         raise HTTPException(status_code=409, detail="This product is currently unavailable")
-    delivery_fees = {"standard": 30, "express": 60, "outside": 80}
+    delivery_fees = {"ucc": 0, "accra": 30, "outside": 50}
+    if request.paymentMethod == "Cash on Delivery" and request.deliveryOption != "ucc":
+        raise HTTPException(status_code=422, detail="Cash on delivery is available for UCC campus orders")
     unit_price = round(float(product["price"]) * (100 - float(product.get("discount", 0))) / 100, 2)
     subtotal = round(unit_price * request.quantity, 2)
     delivery_fee = delivery_fees[request.deliveryOption]
@@ -1266,6 +1293,9 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "notificationStatus": {"adminEmail": "queued", "customerEmail": "queued", "sms": "queued"},
         "destinationShared": False,
+        "unreadCount": 0,
+        "messages": [],
+        "paymentStatus": "pending",
     }
     with DATA_LOCK:
         if storage.enabled():
@@ -1280,11 +1310,131 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
 @app.get("/orders")
 def get_orders(user: dict[str, Any] = Depends(get_current_operator)) -> list[dict[str, Any]]:
     if storage.enabled():
-        return storage.list_orders(user["role"], user["id"])
+        orders = storage.list_orders(user["role"], user["id"])
+        return sorted(orders, key=lambda order: (int(order.get("unreadCount", 0)), str(order.get("createdAt", ""))), reverse=True)
     orders = list(ORDERS.values())
     if user["role"] == "rider":
         return [order for order in orders if order.get("riderUserId") == user["id"]]
-    return orders
+    return sorted(orders, key=lambda order: (int(order.get("unreadCount", 0)), str(order.get("createdAt", ""))), reverse=True)
+
+
+@app.post("/orders/{order_id}/read")
+def mark_order_messages_read(order_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order["unreadCount"] = 0
+    for message in order.get("messages", []):
+        message["read"] = True
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return order
+
+
+@app.get("/orders/{order_id}/messages")
+def get_order_messages(order_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> list[dict[str, Any]]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return order.get("messages", [])
+
+
+@app.post("/orders/{order_id}/messages")
+def create_order_message(order_id: str, request: OrderMessageRequest) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    phone = "".join(character for character in request.phone if character.isdigit())
+    expected = "".join(character for character in str(order.get("phone", "")) if character.isdigit())
+    if not phone or phone != expected:
+        raise HTTPException(status_code=403, detail="Enter the phone number used for this order")
+    rate_key = f"{order_id}:{phone}"
+    now = time.monotonic()
+    recent = [stamp for stamp in _order_message_rate_log.get(rate_key, []) if now - stamp < 600]
+    if len(recent) >= 20:
+        raise HTTPException(status_code=429, detail="Please wait before sending another message")
+    recent.append(now)
+    _order_message_rate_log[rate_key] = recent
+    message = {
+        "id": f"MSG-{secrets.token_hex(6).upper()}",
+        "sender": request.sender.strip(),
+        "text": request.text.strip(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "read": False,
+    }
+    order.setdefault("messages", []).append(message)
+    order["messages"] = order["messages"][-100:]
+    order["unreadCount"] = int(order.get("unreadCount", 0)) + 1
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return message
+
+
+@app.post("/orders/{order_id}/reply")
+def reply_to_order_message(order_id: str, request: OrderReplyRequest, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    message = {"id": f"MSG-{secrets.token_hex(6).upper()}", "sender": "Rabis Chic", "text": request.text.strip(), "timestamp": datetime.now(timezone.utc).isoformat(), "read": True}
+    order.setdefault("messages", []).append(message)
+    order["messages"] = order["messages"][-100:]
+    order["unreadCount"] = 0
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return message
+
+
+@app.post("/orders/{order_id}/review")
+def review_delivered_order(order_id: str, request: OrderReviewRequest) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    phone = "".join(character for character in request.phone if character.isdigit())
+    expected = "".join(character for character in str(order.get("phone", "")) if character.isdigit())
+    if not phone or phone != expected:
+        raise HTTPException(status_code=403, detail="Enter the phone number used for this order")
+    if "delivered" not in str(order.get("status", "")).lower():
+        raise HTTPException(status_code=409, detail="You can rate this delivery once the order is delivered")
+    order.update(deliverySuccess=True, deliveredAt=order.get("deliveredAt") or datetime.now(timezone.utc).isoformat(), rating=request.rating, review=request.review.strip())
+    if "cash" in str(order.get("paymentMethod", "")).lower():
+        order["paymentStatus"] = "paid"
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return order
+
+
+@app.post("/orders/{order_id}/mark-paid")
+def mark_order_paid(order_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order["paymentStatus"] = "paid"
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return order
+
+
+@app.post("/orders/{order_id}/mark-delivered")
+def mark_order_delivered(order_id: str, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.update(status="Delivered", progress=100, eta="Delivered", deliveredAt=datetime.now(timezone.utc).isoformat())
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        write_data("orders.json", ORDERS)
+    return order
 
 
 @app.post("/orders/{order_id}/assign-rider")
@@ -1367,6 +1517,8 @@ async def update_rider_location(
         RIDER_LOCATIONS[order_id] = point
     live_locations[order_id] = point
     order.update(status=point["status"], progress=point["progress"], eta=point["eta"])
+    if point["status"] == "Delivered" and not order.get("deliveredAt"):
+        order["deliveredAt"] = datetime.now(timezone.utc).isoformat()
     if storage.enabled():
         storage.save_order(order)
     else:
@@ -1417,6 +1569,8 @@ async def update_customer_destination(order_id: str, location: CustomerDestinati
         live_locations[order_id] = point
         if delivered or order.get("status") != "Delivered" or not was_destination_shared:
             order.update(status=point["status"], progress=point["progress"], eta=point["eta"])
+            if point["status"] == "Delivered" and not order.get("deliveredAt"):
+                order["deliveredAt"] = datetime.now(timezone.utc).isoformat()
         response.update({key: point[key] for key in ("progress", "eta", "status", "distanceKm")})
         for socket in list(CONNECTED_TRACKERS.get(order_id, set())):
             try:
@@ -1464,6 +1618,8 @@ def simple_update_location(
     if storage.enabled():
         storage.save_location(order_id, point)
     order.update(status=point["status"], progress=point["progress"], eta=point["eta"])
+    if point["status"] == "Delivered" and not order.get("deliveredAt"):
+        order["deliveredAt"] = datetime.now(timezone.utc).isoformat()
     if storage.enabled():
         storage.save_order(order)
     else:
@@ -1505,6 +1661,49 @@ def get_site_content() -> dict[str, Any]:
     if storage.enabled():
         return storage.get_store_setting("site_content") or DEFAULT_SITE_CONTENT
     return read_data("site_content.json", DEFAULT_SITE_CONTENT)
+
+
+@app.post("/ai/chat")
+def onupa_chat(request: OnupaChatRequest, http_request: Request) -> dict[str, Any]:
+    now = time.monotonic()
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    recent = [stamp for stamp in _onupa_rate_log.get(client_ip, []) if now - stamp < 600]
+    if len(recent) >= 20:
+        raise HTTPException(status_code=429, detail="Onupa is taking a short break. Please try again in a few minutes.")
+    recent.append(now)
+    _onupa_rate_log[client_ip] = recent
+    message = request.message.strip()
+    query = message.lower()
+    if any(term in query for term in ("admin", "password", "secret", "api key", "token", "database url", "env file", "show env", "jwt", "hack", "bypass", "server code", "source code", "credentials")):
+        return {"reply": "Sorry charley, I can't share private store details or help bypass account security. I can help you find a cute outfit though. What occasion are you dressing for?", "products": []}
+    catalog = storage.list_products() if storage.enabled() else list(PRODUCTS)
+    public_products = [item for item in catalog[:30] if item.get("status") not in {"out_of_stock", "sold", "just_sold"}]
+    budget = re.search(r"(?:under|below|less than|budget(?: of)?)\s*(?:ghs?\s*)?(\d+(?:\.\d+)?)", query)
+    if budget:
+        cap = float(budget.group(1))
+        recommended = [item for item in public_products if float(item.get("price", 0)) <= cap][:3]
+        reply = f"Charley, these cute in-stock picks are under GHS {cap:g}:" if recommended else f"I don't see an in-stock item under GHS {cap:g} right now. Want me to find the closest options?"
+        return {"reply": reply, "products": recommended}
+    if any(term in query for term in ("track", "order status", "where is my order")):
+        return {"reply": "Open Track Order and enter the order code with the phone number used at checkout. I can help with an outfit while you check, chale.", "products": public_products[:3], "action": "track"}
+    if any(term in query for term in ("size", "fit", "small", "medium", "large")):
+        return {"reply": "We have common sizes S, M, L, and XL depending on the item. Tell me the product and your usual fit, and I can help you choose. For the best fit, share your bust, waist, and hip measurements.", "products": public_products[:3]}
+    if any(term in query for term in ("deliver", "kumasi", "shipping", "accra", "ucc")):
+        return {"reply": "We deliver around UCC the same day. Accra usually takes 1-2 days, and areas outside Accra 2-3 days. For Kumasi, allow 2-3 days, chale. Want me to find an outfit too?", "products": public_products[:3]}
+    if any(term in query for term in ("momo", "cash", "payment", "pay")):
+        return {"reply": "Checkout supports MoMo, and UCC campus orders can choose cash on delivery. You'll see the available payment choices at checkout. Need help picking an outfit?", "products": []}
+    if any(term in query for term in ("return", "exchange")):
+        return {"reply": "If your order arrives damaged or different from what you chose, message the shop within 7 days so Rabi can help with a return. Need help with a style?", "products": []}
+    terms = [word for word in ("wedding", "church", "date", "birthday", "school", "dress", "bag", "shoe", "men", "women", "top", "accessory") if word in query]
+    ranked = sorted(public_products, key=lambda product: sum(term in f"{product.get('name', '')} {product.get('category', '')} {product.get('description', '')}".lower() for term in terms), reverse=True)
+    recommended = ranked[:3]
+    replies = (
+        "Charley, I found a few looks you might love. What colour are you going for?",
+        "Cute choice! Here are some lovely options for you, chale.",
+        "Yesss, let's style that! These pieces could work beautifully.",
+    )
+    variant = int(now * 1000) % len(replies)
+    return {"reply": replies[variant], "products": recommended}
 
 
 @app.put("/site-content/homepage")
