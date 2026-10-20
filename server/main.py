@@ -968,6 +968,8 @@ def get_products(search: str = "") -> list[dict[str, Any]]:
         item = dict(product)
         item.setdefault("isDefault", int(item.get("id", -1)) in default_ids)
         item.setdefault("status", "in_stock")
+        item.setdefault("rating", 4.5)
+        item.setdefault("numReviews", 24)
         item.setdefault("createdByAdmin", not item["isDefault"])
         item.setdefault("images", [item.get("mainImage", "")] if item.get("mainImage") else [])
         item.update({key: value for key, value in overrides.get(str(item["id"]), {}).items() if key in {"name", "price", "discount", "mainImage"}})

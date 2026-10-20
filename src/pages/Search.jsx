@@ -22,7 +22,7 @@ export default function SearchPage({ onBack, onChoose }) {
     <section className="mx-auto max-w-6xl px-4 py-5"><p className="mb-4 text-xs font-semibold text-slate-500">{query.trim() ? `Results for “${query.trim()}”` : 'Popular in the store'}</p>
       {loading ? <p className="py-12 text-center text-sm text-slate-500">Searching products…</p> : products.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{products.map(product => <button key={product.id} onClick={() => onChoose?.(product)} className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm">
         <div className="relative aspect-[4/5] bg-slate-100"><img src={product.mainImage} alt={product.name} loading="lazy" className={`h-full w-full object-cover ${['out_of_stock','sold'].includes(product.status) ? 'grayscale opacity-50' : ''}`} />{product.status && product.status !== 'in_stock' && <span className="absolute left-2 top-2 rounded-full bg-white px-2 py-1 text-[10px] font-bold text-slate-800">{product.status.replaceAll('_', ' ')}</span>}</div>
-        <div className="p-3"><p className="line-clamp-1 text-sm font-bold">{product.name}</p><p className="mt-1 text-xs text-slate-500">{formatCurrency(product.price)}</p></div>
+        <div className="p-3"><p className="line-clamp-1 text-sm font-bold">{product.name}</p><p title="GHS - Ghana cedi" className="mt-1 text-xs text-slate-500">{formatCurrency(product.price)}</p></div>
       </button>)}</div> : <div className="rounded-2xl bg-white py-16 text-center text-sm text-slate-500">No products found. Try another search.</div>}
     </section>
   </main>;

@@ -941,8 +941,8 @@ export default function App() {
                     {selectedProductModal.category}
                   </span>
                   <h3 className="text-xl font-serif font-bold text-slate-900 mt-2">{selectedProductModal.name}</h3>
-                  <p className="text-xs text-slate-600 mt-2 leading-relaxed">{selectedProductModal.description}</p>
-                  <div className="mt-4 rounded-2xl bg-amber-50 p-3"><p className="text-xs font-bold text-slate-800">â˜…â˜…â˜…â˜…â˜… <span className="ml-1 text-slate-600">Customer favourite</span></p><p className="mt-1 text-[11px] leading-5 text-slate-600">Customers love the style and value. Ask us about fit before ordering.</p></div>
+                  <p className="text-xs text-slate-600 mt-2 leading-relaxed">{selectedProductModal.description}</p><div className="mt-2 flex items-center gap-1 whitespace-nowrap overflow-visible text-[11px]"><span className="text-yellow-400">★</span><span className="font-bold">{(Number(selectedProductModal.rating) || 4.5).toFixed(1)}</span><span className="text-gray-400">({selectedProductModal.numReviews || 24})</span></div>
+                  <div className="mt-4 rounded-2xl bg-amber-50 p-3"><p className="text-xs font-bold text-slate-800">Customer favourite</p><p className="mt-1 text-[11px] leading-5 text-slate-600">Customers love the style and value. Ask us about fit before ordering.</p></div>
                 </div>
 
                 <div className="space-y-3 pt-3 border-t border-rose-100">
@@ -1016,7 +1016,7 @@ export default function App() {
 
       {/* NAVIGATION BAR */}
       <header className="bg-white/95 backdrop-blur-md border-b border-rose-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-3 lg:px-6 py-2 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-3 min-h-14">
+        <div className="max-w-7xl mx-auto px-3 lg:px-6 py-2 flex flex-wrap lg:flex-nowrap items-center justify-between gap-2 lg:gap-3 min-h-14">
           <div className="flex shrink-0 items-center gap-2 cursor-pointer" onClick={() => setActiveView('store')}>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center font-serif font-bold text-xl shadow-md">
               R
@@ -1027,8 +1027,12 @@ export default function App() {
             </div>
           </div>
 
+          <nav aria-label="Primary navigation" className="hidden lg:flex min-w-0 flex-1 items-center justify-center gap-4 xl:gap-6 mx-2">
+            {[['🛍️ Shop', '/shop'], ['📍 Track Order', '/track'], ['ℹ️ About', '/about'], ['✉️ Contact', '/contact']].map(([label, path]) => <button key={path} onClick={() => navigateTo(path)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-slate-700 hover:text-slate-950">{label}</button>)}
+          </nav>
+
           {/* SEARCH BAR */}
-          <div className="order-3 w-full min-w-0 max-w-none md:hidden">
+          <div className="order-3 w-full min-w-0 max-w-none lg:hidden">
             <div className="relative">
               <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
               <input 
@@ -1070,54 +1074,17 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 lg:gap-2 order-2 md:order-3 max-w-full pb-0">
-            <button onClick={() => navigateTo('/')} className="hidden px-2 py-2 text-xs font-semibold text-slate-700 hover:text-slate-950 md:inline-flex">Home</button>
-            <button 
-              onClick={() => navigateTo('/shop')}
-              className={`hidden md:flex px-2 py-2 rounded-xl text-xs font-semibold transition items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'text-slate-950' : 'text-slate-600 hover:text-slate-950'}`}
-            >
-              <i className="fa-solid fa-bag-shopping"></i> All Products
-            </button>
-
-            <button 
-              onClick={() => navigateTo('/track')}
-              className="hidden md:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
-            >
-              <i className="fa-solid fa-map-location-dot"></i> Track Order
-            </button>
-
-            <button 
-              onClick={() => navigateTo('/orders')}
-              className="hidden xl:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
-            >
-              <i className="fa-solid fa-magnifying-glass-chart"></i> Lookup
-            </button>
-
-            <button 
-              onClick={() => navigateTo('/about')}
-              className="hidden lg:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
-            >
-              <i className="fa-solid fa-heart"></i> About
-            </button>
-
-            <button 
-              onClick={() => navigateTo('/contact')}
-              className="hidden lg:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
-            >
-              <i className="fa-solid fa-address-book"></i> Contact
-            </button>
-            <button onClick={() => navigateTo('/faq')} className="hidden lg:inline-flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950">FAQ</button>
-
-            <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="hidden md:grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><SearchIcon size={18} /></button>
-            <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="hidden md:grid relative h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
+          <div className="order-2 lg:order-3 flex shrink-0 items-center gap-1 lg:gap-2 max-w-full pb-0">
+            <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="hidden lg:grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><SearchIcon size={18} /></button>
+            <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="hidden lg:grid relative h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
             <button onClick={() => { navigateTo('/shop'); window.setTimeout(() => document.getElementById('order-checkout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120); }} aria-label="Go to order checkout" title="Cart / checkout" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><ShoppingBag size={18} /><span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{checkoutData.quantity || 0}</span></button>
 
-            {!user ? <div className="hidden items-center gap-1 md:flex"><button onClick={() => navigateTo('/login')} className="rounded-full px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Sign Up</button></div>
-              : <div className="relative hidden md:block"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-slate-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
+            {!user ? <div className="hidden items-center gap-1 lg:flex"><button onClick={() => navigateTo('/login')} className="rounded-full px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Sign Up</button></div>
+              : <div className="relative hidden lg:block"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-slate-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
                 {accountMenuOpen && <div className="absolute right-0 top-12 z-[90] w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-[11px] text-slate-500">{user.email}</p><button onClick={() => navigateTo('/orders')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">My Orders</button><button onClick={() => navigateTo('/wishlist')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">Wishlist</button>{isAdminAccount && <button onClick={() => navigateTo('/admin')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50">Admin Portal</button>}<button onClick={() => { logout(); navigateTo('/login'); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">Log Out</button></div>}
               </div>}
 
-            <button onClick={() => setMobileMenuOpen(value => !value)} aria-label="Open navigation" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 md:hidden">{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
+            <button onClick={() => setMobileMenuOpen(value => !value)} aria-label="Open navigation" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 lg:hidden">{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
 
             {/* Only an authenticated administrator sees the dashboard link. */}
             {isAdminAccount && (
@@ -1130,12 +1097,8 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto px-3 pb-2 md:hidden"><button onClick={() => navigateTo('/shop')} className="min-h-10 shrink-0 snap-start rounded-full bg-slate-950 px-4 text-xs font-bold text-white">🛍 All Products</button><button onClick={() => navigateTo('/track')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">Track Order</button><button onClick={() => window.dispatchEvent(new Event('onupa:open'))} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">Chat Onupa</button></div>
-        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 shadow-2xl md:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">
-          {[['Home','/'],['All Products','/shop'],['Track Order','/track'],['My Orders','/orders'],['Wishlist','/wishlist'],['Search','/search'],['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}
-          {!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 px-3 text-left text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); navigateTo('/login'); }} className="min-h-11 rounded-xl bg-red-50 px-3 text-left text-sm font-bold text-red-700">Log Out</button>}
-          {isAdminAccount && <button onClick={() => navigateTo('/admin')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Admin Portal</button>}
-        </div></nav>}
+        <div className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto px-3 pb-2 lg:hidden"><button onClick={() => navigateTo('/shop')} className="min-h-10 shrink-0 snap-start rounded-full bg-slate-950 px-4 text-xs font-bold text-white">🛍️ Shop</button><button onClick={() => navigateTo('/track')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">📍 Track Order</button><button onClick={() => navigateTo('/about')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">ℹ️ About</button><button onClick={() => navigateTo('/contact')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">✉️ Contact</button></div>
+        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div><div className="fixed inset-x-4 bottom-4 grid grid-cols-2 gap-2 border-t border-slate-100 bg-white pt-3">{!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); navigateTo('/login'); }} className="col-span-2 min-h-11 rounded-xl bg-red-50 text-sm font-bold text-red-700">Log Out</button>}{isAdminAccount && <button onClick={() => navigateTo('/admin')} className="col-span-2 min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button>}</div></nav>}
       </header>
 
       {siteContent?.noticeBar?.active && siteContent.noticeBar.text && <div role="status" className={`px-4 py-2 text-center text-xs font-semibold ${siteContent.noticeBar.type === 'sale' ? 'bg-black text-white' : siteContent.noticeBar.type === 'out_of_stock' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>{siteContent.noticeBar.text}</div>}
@@ -1183,7 +1146,7 @@ export default function App() {
           {/* CATEGORIES */}
           <div id="store" className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">All Products</h3>
+              <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">✨ All Products</h3>
               <span className="text-xs text-rose-500 font-semibold">{filteredProducts.length} Items</span>
             </div>
             
@@ -1194,7 +1157,7 @@ export default function App() {
                   onClick={() => setSelectedCategory(cat)}
                   className={`px-4 md:px-5 py-2 md:py-2.5 rounded-2xl text-xs font-bold transition flex-shrink-0 ${selectedCategory === cat ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'bg-white text-slate-600 border border-rose-100 hover:bg-rose-50'}`}
                 >
-                  {cat === 'All' ? 'âœ¨ All Products' : cat}
+                  {cat === 'All' ? '✨ All Products' : cat}
                 </button>
               ))}
             </div>
@@ -1225,9 +1188,7 @@ export default function App() {
                     <button type="button" aria-label={wishlist.some(id => String(id) === String(product.id)) ? 'Remove from wishlist' : 'Add to wishlist'} onClick={(event) => { event.stopPropagation(); toggleWishlist(product.id); }} className="absolute left-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-white/95 text-rose-600 shadow"><Heart size={18} fill={wishlist.some(id => String(id) === String(product.id)) ? 'currentColor' : 'none'} /></button>
                     {product.status && product.status !== 'in_stock' && <span className={`absolute left-14 top-3 rounded-full px-2.5 py-1 text-[10px] font-bold ${product.status === 'just_sold' ? 'bg-orange-100 text-orange-800' : product.status === 'out_of_stock' ? 'bg-slate-200 text-slate-700' : 'bg-red-100 text-red-800'}`}>{product.status === 'just_sold' ? 'Just Sold' : product.status === 'out_of_stock' ? 'Out of Stock' : 'Sold Out'}</span>}
                     {['out_of_stock','sold'].includes(product.status) && <span className="absolute inset-0 flex items-center justify-center bg-slate-900/20 text-sm font-black uppercase tracking-widest text-white">Unavailable</span>}
-                    <span className="absolute right-3 top-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-rose-600">
-                      â˜… {product.rating}
-                    </span>
+                    <span className="absolute right-3 top-3 flex items-center gap-1 whitespace-nowrap overflow-visible bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px]"><span className="text-yellow-400">★</span><span className="font-bold text-slate-900">{(Number(product.rating) || 4.5).toFixed(1)}</span><span className="text-gray-400">({product.numReviews || 24})</span></span>
                   </div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg">
                     {product.category}

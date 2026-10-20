@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
 import AdminPageShell from './AdminPageShell';
@@ -14,6 +14,7 @@ export default function ContentManager() {
   const [saving, setSaving] = useState(false);
   const [busyImage, setBusyImage] = useState(-1);
   const [msg, setMsg] = useState('');
+  const slideInputRefs = useRef({});
 
   useEffect(() => {
     api.get('/site-content/homepage').then(({ data }) => {
@@ -55,7 +56,7 @@ export default function ContentManager() {
       updateSlide(index, { imageUrl });
       setMsg('Photo ready. Save to publish.');
     } catch (error) { setMsg(error.message); }
-    finally { setBusyImage(-1); event.target.value = ''; }
+    finally { setBusyImage(-1); event.target.value = ''; event.target.removeAttribute('capture'); }
   };
   const save = async event => {
     event.preventDefault(); setSaving(true); setMsg('');
@@ -86,7 +87,7 @@ export default function ContentManager() {
             <label className="text-xs font-semibold">Badge<select value={slide.badge || 'None'} onChange={event => updateSlide(index, { badge: event.target.value })} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm">{BADGES.map(badge => <option key={badge}>{badge}</option>)}</select></label><label className="text-xs font-semibold">Button destination<select value={slide.buttonLink || '/shop'} onChange={event => updateSlide(index, { buttonLink: event.target.value })} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm">{LINKS.map(link => <option key={link} value={link}>{link}</option>)}</select></label>
             <label className="text-xs font-semibold">Button text<input maxLength={32} value={slide.buttonText || 'Shop Now'} onChange={event => updateSlide(index, { buttonText: event.target.value })} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-sm" /></label>
           </div>
-          <label className="flex min-h-12 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-center text-sm font-bold">{busyImage === index ? 'Loading photo...' : 'Add a hero photo'}<span className="mt-1 text-[10px] font-medium text-slate-500">Photo Library · Take photo · Choose File · Google Drive</span><input type="file" accept="image/*" onChange={event => pickImage(index, event)} className="sr-only" /></label>
+          <input ref={element => { slideInputRefs.current[index] = element; }} type="file" accept="image/*" onChange={event => pickImage(index, event)} className="sr-only" /><div className="flex min-h-12 flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-center">{busyImage === index ? <span className="text-sm font-bold">Loading photo...</span> : <><button type="button" onClick={() => { slideInputRefs.current[index]?.removeAttribute('capture'); slideInputRefs.current[index]?.click(); }} className="min-h-10 rounded-lg bg-white px-3 text-xs font-bold shadow-sm">Select photo</button><button type="button" onClick={() => { slideInputRefs.current[index]?.setAttribute('capture', 'environment'); slideInputRefs.current[index]?.click(); }} className="min-h-10 rounded-lg border border-slate-300 px-3 text-xs font-bold">Take photo</button><span className="w-full text-[10px] font-medium text-slate-500">Photo Library · Choose File · Google Drive</span></>}</div>
           {slide.imageUrl && <img src={slide.imageUrl} alt={`Slide ${index + 1} preview`} className="aspect-video w-full rounded-xl object-cover" />}
         </article>)}
         <button type="button" onClick={() => setContent(current => ({ ...current, heroSlides: [...current.heroSlides, { ...DEFAULT_SLIDE, id: `slide-${Date.now()}`, title: '' }] }))} className="min-h-12 w-full rounded-xl border border-slate-300 text-sm font-bold">+ Add New Slide</button>
