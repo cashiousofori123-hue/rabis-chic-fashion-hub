@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import { formatCurrency } from '../../utils/formatCurrency';
 import AdminPageShell from './AdminPageShell';
 
 export default function Overview() {
@@ -38,7 +39,7 @@ export default function Overview() {
       </div>
       <div className="bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/80 shadow-sm space-y-2">
         <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Revenue</span>
-        <div className="text-3xl font-black text-slate-900">GH₵ {revenue.toFixed(0)}</div>
+        <div className="text-3xl font-black text-slate-900">{formatCurrency(revenue.toFixed(0))}</div>
         <p className="text-[11px] text-amber-600 font-medium">From all orders</p>
       </div>
       <div className="bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/80 shadow-sm space-y-2">

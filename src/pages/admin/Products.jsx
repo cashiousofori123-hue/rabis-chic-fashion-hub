@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, ImagePlus, LockKeyhole, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import api from '../../api';
+import { formatCurrency } from '../../utils/formatCurrency';
 import AdminPageShell from './AdminPageShell';
 
 const CATEGORIES = ['Women', 'Men', 'Dresses', 'Tops', 'Bags', 'Shoes', 'Accessories'];
@@ -150,7 +151,7 @@ export default function Products() {
           </label>}
       </div>
       <div className="space-y-3 p-3.5">
-        <div className="min-h-12"><h3 className="line-clamp-1 text-sm font-bold text-slate-900">{product.name}</h3><p className="mt-1 line-clamp-1 text-xs text-slate-500">{product.category} · GH₵ {Number(product.price).toFixed(2)}</p></div>
+        <div className="min-h-12"><h3 className="line-clamp-1 text-sm font-bold text-slate-900">{product.name}</h3><p className="mt-1 line-clamp-1 text-xs text-slate-500">{product.category} · {formatCurrency(Number(product.price).toFixed(2))}</p></div>
         <div className="flex items-center gap-2 border-t border-slate-100 pt-2">
           {product.isDefault ? <span className="flex min-h-11 flex-1 items-center gap-1.5 text-[11px] font-semibold text-slate-500"><ShieldCheck size={15} /> Protected default</span> : <>
             <button type="button" onClick={() => startEdit(product)} className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-100 px-3 text-xs font-bold text-slate-700"><Pencil size={15} /> Edit</button>
@@ -188,9 +189,9 @@ export default function Products() {
             <button type="button" aria-label="Close product form" disabled={saving} onClick={() => setFormOpen(false)} className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button>
           </header>
           <form onSubmit={handleSave} className="space-y-5 px-4 py-4 sm:px-6">
-            <input ref={inputRef} type="file" accept="image/*" multiple capture="environment" className="sr-only" onChange={event => { appendPhotos(event.target.files); event.target.value = ''; }} />
+            <input ref={inputRef} type="file" accept="image/*" multiple className="sr-only" onChange={event => { appendPhotos(event.target.files); event.target.value = ''; }} />
             <button type="button" onClick={() => inputRef.current?.click()} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); appendPhotos(event.dataTransfer.files); }} className="flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center hover:border-slate-500">
-              <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-700 shadow-sm"><ImagePlus size={24} /></span><span className="text-sm font-bold text-slate-800">Tap to take a photo or choose from gallery</span><span className="text-xs text-slate-500">Up to 5 photos · JPEG, PNG or WebP</span>
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-700 shadow-sm"><ImagePlus size={24} /></span><span className="text-sm font-bold text-slate-800">Add product photos</span><span className="text-xs text-slate-500">Photo Library · Take photo · Choose File · Google Drive</span><span className="text-[10px] text-slate-400">Up to 5 photos · JPEG, PNG or WebP</span>
             </button>
             {(existingImages.length > 0 || photos.length > 0) && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {existingImages.map((url, index) => <div key={`old-${url}-${index}`} className="relative aspect-square overflow-hidden rounded-xl bg-slate-100"><img src={url} alt="Product preview" className="h-full w-full object-cover" /><button type="button" onClick={() => setExistingImages(current => current.filter((_, i) => i !== index))} aria-label="Remove photo" className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-full bg-white shadow"><X size={16} /></button></div>)}
@@ -198,7 +199,7 @@ export default function Products() {
             </div>}
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-xs font-bold text-slate-700">Product name<input required maxLength={120} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} placeholder="e.g. White Dress with Red Bag" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium outline-none focus:border-slate-700" /></label>
-              <label className="space-y-1 text-xs font-bold text-slate-700">Price (GHS)<input required type="number" min="0.01" step="0.01" value={form.price} onChange={event => setForm({ ...form, price: event.target.value })} placeholder="180.00" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium outline-none focus:border-slate-700" /></label>
+              <label title="GHS · Ghana cedi" className="space-y-1 text-xs font-bold text-slate-700">Price (GH₵)<input required type="number" min="0.01" step="0.01" value={form.price} onChange={event => setForm({ ...form, price: event.target.value })} placeholder="180.00" className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium outline-none focus:border-slate-700" /></label>
               <label className="space-y-1 text-xs font-bold text-slate-700">Category<select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium">{CATEGORIES.map(category => <option key={category}>{category}</option>)}</select></label>
               <label className="space-y-1 text-xs font-bold text-slate-700">Availability<select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })} className="mt-1 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium">{STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}</select></label>
             </div>

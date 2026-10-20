@@ -224,6 +224,13 @@ def get_order(order_id: str) -> dict[str, Any] | None:
         return row[0] if row else None
 
 
+def get_order_by_tracking_code(tracking_code: str) -> dict[str, Any] | None:
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT payload FROM orders WHERE payload->>'trackingCode' = %s", (tracking_code,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+
 def list_orders(role: str, user_id: str) -> list[dict[str, Any]]:
     with _connect() as connection, connection.cursor() as cursor:
         if role == "rider":

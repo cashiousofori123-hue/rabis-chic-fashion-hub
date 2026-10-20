@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageCircle, Send, X } from 'lucide-react';
 import api from '../api';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const PHOTO = '/onupa.jpg';
 const WELCOME = "Hey! I'm Onupa, your personal stylist at Rabis Chic. I know our prices, sizes, delivery and collection. What occasion are we dressing for, charley?";
-const chips = ['Wedding guest dresses', "What's under GHS 200?", 'Do you deliver to Kumasi?', 'Recommend my size'];
+const chips = ['Wedding guest dresses', "What's under GH₵ 200?", 'Do you deliver to Kumasi?', 'Recommend my size'];
 const isPrivateRequest = value => ['admin', 'password', 'secret', 'api key', 'token', 'database url', 'show env', 'jwt', 'hack', 'bypass', 'credentials'].some(term => value.toLowerCase().includes(term));
 
 function localAnswer(prompt, products) {
@@ -15,7 +16,7 @@ function localAnswer(prompt, products) {
   if (budget) {
     const limit = Number(budget[1]);
     const items = inStock.filter(product => Number(product.price) <= limit).slice(0, 3);
-    return { reply: items.length ? `These cute in-stock picks are under GHS ${limit}:` : `I don't see an in-stock item under GHS ${limit}. Want the closest options?`, products: items };
+    return { reply: items.length ? `These cute in-stock picks are under GH₵ ${limit}:` : `I don't see an in-stock item under GH₵ ${limit}. Want the closest options?`, products: items };
   }
   const terms = ['wedding', 'church', 'date', 'birthday', 'dress', 'bag', 'shoe', 'men', 'women', 'top'].filter(term => query.includes(term));
   const items = inStock.filter(product => !terms.length || terms.some(term => `${product.name} ${product.category} ${product.description}`.toLowerCase().includes(term))).slice(0, 3);
@@ -38,6 +39,7 @@ export default function Onupa({ products = [], onNavigate, onPickProduct }) {
   const endRef = useRef(null);
   useEffect(() => { try { localStorage.setItem('onupa_chat', JSON.stringify(messages.slice(-40))); } catch {} }, [messages]);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, typing, open]);
+  useEffect(() => { const openChat = () => setOpen(true); window.addEventListener('onupa:open', openChat); return () => window.removeEventListener('onupa:open', openChat); }, []);
 
   const sendMessage = async value => {
     const prompt = value.trim();
@@ -63,7 +65,7 @@ export default function Onupa({ products = [], onNavigate, onPickProduct }) {
           <div className={`max-w-[84%] rounded-2xl px-3 py-2.5 text-xs leading-5 shadow-sm ${message.from === 'user' ? 'rounded-br-sm bg-slate-950 text-white' : 'rounded-bl-sm bg-white text-slate-700'}`}>
             <p>{message.text}</p>
             {message.action && <button onClick={() => onNavigate?.(message.action === 'faq' ? '/faq' : '/track')} className="mt-2 min-h-9 rounded-lg bg-slate-100 px-3 font-bold text-slate-800">Open {message.action === 'faq' ? 'FAQs' : 'Track Order'}</button>}
-            {message.products?.length > 0 && <div className="mt-2 space-y-2">{message.products.map(product => <button key={product.id} onClick={() => onPickProduct?.(products.find(item => String(item.id) === String(product.id)) || product)} className="flex w-full items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 text-left"><img src={product.mainImage} alt="" className="h-14 w-12 rounded-lg object-cover" /><span className="min-w-0 flex-1"><span className="block truncate font-bold">{product.name}</span><span className="text-[10px] text-slate-500">GHS {product.price}</span></span></button>)}</div>}
+            {message.products?.length > 0 && <div className="mt-2 space-y-2">{message.products.map(product => <button key={product.id} onClick={() => onPickProduct?.(products.find(item => String(item.id) === String(product.id)) || product)} className="flex w-full items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 text-left"><img src={product.mainImage} alt="" className="h-14 w-12 rounded-lg object-cover" /><span className="min-w-0 flex-1"><span className="block truncate font-bold">{product.name}</span><span className="text-[10px] text-slate-500">{formatCurrency(product.price)}</span></span></button>)}</div>}
           </div>
         </div>)}
         {typing && <div className="flex items-center gap-2"><Avatar size="h-6 w-6" /><span className="rounded-2xl bg-white px-3 py-2 text-xs text-slate-500">Onupa is typing...</span></div>}

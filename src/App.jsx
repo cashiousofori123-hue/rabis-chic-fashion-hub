@@ -1,10 +1,12 @@
-﻿import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Fingerprint, LogOut, ShieldCheck, Menu, X, Heart, ShoppingBag, Search as SearchIcon, UserRound, ChevronDown, HelpCircle } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
+import { formatCurrency } from './utils/formatCurrency';
 import { useAuth } from './context/AuthContext';
 import { telLink, whatsappLink } from './utils/contactLinks';
 import Onupa from './components/Onupa';
+import ApprovalStatus from './components/ApprovalStatus';
 import WhatsAppButton from './components/WhatsAppButton';
 const SearchPage = lazy(() => import('./pages/Search'));
 const WishlistPage = lazy(() => import('./pages/Wishlist'));
@@ -243,6 +245,7 @@ export default function App() {
   });
 
   const [orderStage, setOrderStage] = useState('idle');
+  const [approvalNotice, setApprovalNotice] = useState('');
   const [showCallModal, setShowCallModal] = useState(false);
 
   // Security Settings State
@@ -279,6 +282,29 @@ export default function App() {
   const deliveryFees = { ucc: 0, accra: 30, outside: 50 };
   const orderDeliveryFee = deliveryFees[checkoutData.deliveryOption];
   const orderTotal = orderSubtotal - orderDiscount + orderDeliveryFee;
+
+  useEffect(() => {
+    const code = selectedOrderForTracking?.trackingCode;
+    if (orderStage !== 'submitted' || !code) return undefined;
+    let active = true;
+    const check = async () => {
+      try {
+        const { data } = await api.get(`/orders/track/${encodeURIComponent(code)}/status`);
+        if (!active) return;
+        setSelectedOrderForTracking(current => ({ ...(current || {}), ...data.order }));
+        if (data.approvalStatus === 'approved' && data.trackingEnabled) {
+          setOrders(current => current.map(order => order.id === data.order.id ? data.order : order));
+          setApprovalNotice('Approved! Opening map…');
+          window.history.pushState({}, '', `/track?order=${encodeURIComponent(data.order.id)}&autoOpenMap=true`);
+          setRoutePath('/track');
+          setOrderStage('approved');
+        }
+      } catch { /* Keep waiting and retry on the next poll. */ }
+    };
+    check();
+    const timer = window.setInterval(check, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [orderStage, selectedOrderForTracking?.trackingCode]);
 
   useEffect(() => {
     api.get('/store-contact')
@@ -385,7 +411,7 @@ export default function App() {
             } catch { /* Browser sound may be muted or unavailable. */ }
             if ('Notification' in window && Notification.permission === 'granted') {
               new Notification('New Rabiâ€™s Chic order', {
-                body: `${newest.customer} ordered ${newest.items}. Total GHâ‚µ ${newest.amount}.`,
+                body: `${newest.customer} ordered ${newest.items}. Total ${formatCurrency(newest.amount)}.`,
                 tag: newest.id,
               });
             }
@@ -542,6 +568,13 @@ export default function App() {
     } catch (error) {
       alert(error.response?.data?.detail || 'Could not approve order.');
     }
+  };
+
+  const handleAdminRejectOrder = async (orderId) => {
+    try {
+      const { data } = await api.post(`/orders/${encodeURIComponent(orderId)}/reject`);
+      setOrders(current => current.map(order => order.id === orderId ? data : order));
+    } catch (error) { alert(error.response?.data?.detail || 'Could not reject order.'); }
   };
 
   const handleLookupOrder = async (e) => {
@@ -832,7 +865,7 @@ export default function App() {
     return <>
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
-          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· GHâ‚µ {adminOrderAlert.amount}</p>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· {formatCurrency(adminOrderAlert.amount)}</p>
             <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
           <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
@@ -855,13 +888,27 @@ export default function App() {
   if (routePath === '/wishlist') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><WishlistPage wishlist={wishlist} setWishlist={setWishlist} onBack={() => navigateTo('/')} onChoose={choosePublicProduct} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
   if (routePath === '/faq') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><FAQPage onBack={() => navigateTo('/')} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
   if (routePath === '/login' || routePath === '/signup') return <Suspense fallback={<div className="min-h-screen bg-white" />}><AccountPage mode={routePath === '/signup' ? 'signup' : 'login'} onBack={() => navigateTo('/')} onNavigate={navigateTo} /></Suspense>;
+  const requestedTrackingCode = new URLSearchParams(window.location.search).get('code');
+  if (routePath === '/track' && requestedTrackingCode) return <ApprovalStatus trackingCode={requestedTrackingCode} onApproved={order => {
+    setSelectedOrderForTracking(order);
+    setOrders(current => [order, ...current.filter(item => item.id !== order.id)]);
+    setApprovalNotice('Approved! Opening map…');
+    window.history.replaceState({}, '', `/track?order=${encodeURIComponent(order.id)}&autoOpenMap=true`);
+    setRoutePath('/track');
+  }} />;
+  if (routePath === '/track' && activeTrackingOrder && (activeTrackingOrder.approvalStatus === 'pending_approval' || (!activeTrackingOrder.approvalStatus && String(activeTrackingOrder.status || '').includes('Pending'))) && activeTrackingOrder.trackingCode) return <ApprovalStatus trackingCode={activeTrackingOrder.trackingCode} onApproved={order => {
+    setSelectedOrderForTracking(order);
+    setOrders(current => [order, ...current.filter(item => item.id !== order.id)]);
+    window.history.replaceState({}, '', `/track?order=${encodeURIComponent(order.id)}&autoOpenMap=true`);
+    setRoutePath('/track');
+  }} />;
   if (routePath === '/track' && activeTrackingOrder) return <Suspense fallback={<div className="h-screen bg-slate-100" />}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>;
 
   return (
     <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
         <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
-          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· GHâ‚µ {adminOrderAlert.amount}</p>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} Â· {adminOrderAlert.items} Â· {formatCurrency(adminOrderAlert.amount)}</p>
             <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
           <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
@@ -901,7 +948,7 @@ export default function App() {
                 <div className="space-y-3 pt-3 border-t border-rose-100">
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400 font-bold uppercase">Price</span>
-                    <span className="text-2xl font-black text-slate-900">GHâ‚µ {effectivePrice(selectedProductModal)}</span>
+                    <span title="GHS · Ghana cedi" className="text-2xl font-black text-slate-900">{formatCurrency(effectivePrice(selectedProductModal))}</span>
                   </div>
                   <button 
                     onClick={() => {
@@ -968,20 +1015,20 @@ export default function App() {
       )}
 
       {/* NAVIGATION BAR */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-rose-100 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-7xl mx-auto px-3 py-2 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-4 min-h-14">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveView('store')}>
+      <header className="bg-white/95 backdrop-blur-md border-b border-rose-100 sticky top-0 z-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-3 lg:px-6 py-2 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-3 min-h-14">
+          <div className="flex shrink-0 items-center gap-2 cursor-pointer" onClick={() => setActiveView('store')}>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center font-serif font-bold text-xl shadow-md">
               R
             </div>
             <div>
-              <h1 className="font-serif font-bold text-lg md:text-xl text-slate-900 tracking-wide leading-tight">Rabi's Chic</h1>
+              <h1 className="whitespace-nowrap font-serif font-bold text-lg md:text-xl text-slate-900 tracking-wide leading-tight">Rabi's Chic</h1>
               <p className="text-[9px] md:text-[10px] text-rose-500 uppercase tracking-widest font-semibold">UCC Campus Store</p>
             </div>
           </div>
 
           {/* SEARCH BAR */}
-          <div className="w-full md:w-auto md:flex-1 max-w-none md:max-w-md order-3 md:order-2">
+          <div className="order-3 w-full min-w-0 max-w-none md:hidden">
             <div className="relative">
               <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
               <input 
@@ -1015,7 +1062,7 @@ export default function App() {
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-rose-50"
                     >
                       <img src={optimizeProductImage(product.mainImage)} loading="lazy" alt="" className="h-11 w-9 rounded object-cover" />
-                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-900">{product.name}</span><span className="text-[10px] text-slate-500">{product.category} Â· GHâ‚µ {product.price}</span></span>
+                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-900">{product.name}</span><span className="text-[10px] text-slate-500">{product.category} Â· {formatCurrency(product.price)}</span></span>
                     </button>
                   )) : <p role="status" className="px-3 py-3 text-xs text-slate-500">No products match â€œ{searchQuery.trim()}â€.</p>}
                 </div>
@@ -1023,43 +1070,43 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1 md:gap-2 order-2 md:order-3 max-w-full pb-0">
-            <button onClick={() => navigateTo('/')} className="hidden px-2.5 py-2 text-sm font-semibold text-slate-700 hover:text-slate-950 xl:inline-flex">Home</button>
+          <div className="flex shrink-0 items-center gap-1 lg:gap-2 order-2 md:order-3 max-w-full pb-0">
+            <button onClick={() => navigateTo('/')} className="hidden px-2 py-2 text-xs font-semibold text-slate-700 hover:text-slate-950 md:inline-flex">Home</button>
             <button 
               onClick={() => navigateTo('/shop')}
-              className={`hidden md:flex px-2.5 py-2 rounded-xl text-sm font-semibold transition items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'text-slate-950' : 'text-slate-600 hover:text-slate-950'}`}
+              className={`hidden md:flex px-2 py-2 rounded-xl text-xs font-semibold transition items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'text-slate-950' : 'text-slate-600 hover:text-slate-950'}`}
             >
-              <i className="fa-solid fa-bag-shopping"></i> Store
+              <i className="fa-solid fa-bag-shopping"></i> All Products
             </button>
 
             <button 
               onClick={() => navigateTo('/track')}
-              className="hidden xl:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
+              className="hidden md:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-map-location-dot"></i> Track Order
             </button>
 
             <button 
               onClick={() => navigateTo('/orders')}
-              className="hidden xl:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
+              className="hidden xl:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-magnifying-glass-chart"></i> Lookup
             </button>
 
             <button 
               onClick={() => navigateTo('/about')}
-              className="hidden lg:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
+              className="hidden lg:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-heart"></i> About
             </button>
 
             <button 
               onClick={() => navigateTo('/contact')}
-              className="hidden lg:flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
+              className="hidden lg:flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950 whitespace-nowrap"
             >
               <i className="fa-solid fa-address-book"></i> Contact
             </button>
-            <button onClick={() => navigateTo('/faq')} className="hidden xl:inline-flex px-2 py-2 text-sm font-semibold text-slate-600 hover:text-slate-950">FAQ</button>
+            <button onClick={() => navigateTo('/faq')} className="hidden lg:inline-flex px-2 py-2 text-xs font-semibold text-slate-600 hover:text-slate-950">FAQ</button>
 
             <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="hidden md:grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><SearchIcon size={18} /></button>
             <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="hidden md:grid relative h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
@@ -1076,15 +1123,16 @@ export default function App() {
             {isAdminAccount && (
               <button
                 onClick={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }}
-                className="hidden xl:flex px-2.5 py-2 rounded-xl text-xs font-bold transition items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
+                className="hidden lg:flex px-2.5 py-2 rounded-xl text-xs font-bold transition items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
                 <i className="fa-solid fa-user-shield"></i> Admin Portal
               </button>
             )}
           </div>
         </div>
+        <div className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto px-3 pb-2 md:hidden"><button onClick={() => navigateTo('/shop')} className="min-h-10 shrink-0 snap-start rounded-full bg-slate-950 px-4 text-xs font-bold text-white">🛍 All Products</button><button onClick={() => navigateTo('/track')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">Track Order</button><button onClick={() => window.dispatchEvent(new Event('onupa:open'))} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">Chat Onupa</button></div>
         {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 shadow-2xl md:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">
-          {[['Home','/'],['Store','/shop'],['Track Order','/track'],['My Orders','/orders'],['Wishlist','/wishlist'],['Search','/search'],['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => navigateTo(path)} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}
+          {[['Home','/'],['All Products','/shop'],['Track Order','/track'],['My Orders','/orders'],['Wishlist','/wishlist'],['Search','/search'],['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}
           {!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 px-3 text-left text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); navigateTo('/login'); }} className="min-h-11 rounded-xl bg-red-50 px-3 text-left text-sm font-bold text-red-700">Log Out</button>}
           {isAdminAccount && <button onClick={() => navigateTo('/admin')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Admin Portal</button>}
         </div></nav>}
@@ -1135,7 +1183,7 @@ export default function App() {
           {/* CATEGORIES */}
           <div id="store" className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">Browse Collections</h3>
+              <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">All Products</h3>
               <span className="text-xs text-rose-500 font-semibold">{filteredProducts.length} Items</span>
             </div>
             
@@ -1158,7 +1206,7 @@ export default function App() {
               {siteContent.featured.productIds.map(id => products.find(item => String(item.id) === String(id))).filter(Boolean).map(product => <button key={product.id} onClick={() => setSelectedProductModal(product)} className="overflow-hidden rounded-2xl border border-rose-100 bg-white text-left shadow-sm">
                 <img src={optimizeProductImage(product.mainImage)} alt={product.name} className="h-36 w-full object-cover" />
                 <span className="block truncate px-3 pt-2 text-xs font-bold text-slate-900">{product.name}</span>
-                <span className="block px-3 pb-3 text-xs text-rose-700">GHâ‚µ {effectivePrice(product)}</span>
+                <span title="GHS · Ghana cedi" className="block px-3 pb-3 text-xs text-rose-700">{formatCurrency(effectivePrice(product))}</span>
               </button>)}
             </div>
           </section>}
@@ -1191,8 +1239,8 @@ export default function App() {
                 <div className="mt-4 pt-3 border-t border-rose-50 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] text-slate-400 font-medium block">Price</span>
-                    <div className="text-base md:text-lg font-black text-slate-900">GHâ‚µ {effectivePrice(product)}</div>
-                    {Number(product.discount) > 0 && <div className="text-[10px] text-slate-500"><span className="line-through">GHâ‚µ {product.price}</span> Â· {product.discount}% off</div>}
+                    <div title="GHS · Ghana cedi" className="text-base md:text-lg font-black text-slate-900">{formatCurrency(effectivePrice(product))}</div>
+                    {Number(product.discount) > 0 && <div className="text-[10px] text-slate-500"><span className="line-through">{formatCurrency(product.price)}</span> Â· {product.discount}% off</div>}
                   </div>
                   <button 
                     disabled={['out_of_stock','sold'].includes(product.status)}
@@ -1242,7 +1290,7 @@ export default function App() {
                       className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500 mb-2"
                     >
                       {products.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} â€” GHâ‚µ {p.price}</option>
+                        <option key={p.id} value={p.id}>{p.name} â€” {formatCurrency(p.price)}</option>
                       ))}
                     </select>
 
@@ -1328,8 +1376,8 @@ export default function App() {
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Delivery option</label>
                       <select value={checkoutData.deliveryOption} onChange={(e) => setCheckoutData({ ...checkoutData, deliveryOption: e.target.value, ...(e.target.value !== 'ucc' && checkoutData.paymentMethod === 'Cash on Delivery' ? { paymentMethod: 'MTN MoMo' } : {}) })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
                         <option value="ucc">UCC Campus Same Day · Free</option>
-                        <option value="accra">Accra · 1-2 Days · GHS 30</option>
-                        <option value="outside">Outside Accra · 2-3 Days · GHS 50</option>
+                        <option value="accra">Accra · 1-2 Days · GH₵ 30</option>
+                        <option value="outside">Outside Accra · 2-3 Days · GH₵ 50</option>
                       </select>
                     </div>
                     <div>
@@ -1376,17 +1424,17 @@ export default function App() {
                       </div>
                       <div className="flex justify-between text-slate-300">
                         <span>Subtotal:</span>
-                        <span className="font-mono text-white">GHâ‚µ {orderSubtotal}</span>
+                        <span title="GHS · Ghana cedi" className="font-mono text-white">{formatCurrency(orderSubtotal)}</span>
                       </div>
                       <div className="flex justify-between text-slate-300">
                         <span>Delivery ({checkoutData.deliveryOption}):</span>
-                        <span className="font-mono text-white">GHâ‚µ {orderDeliveryFee}</span>
+                        <span title="GHS · Ghana cedi" className="font-mono text-white">{formatCurrency(orderDeliveryFee)}</span>
                       </div>
-                      {orderDiscount > 0 && <div className="flex justify-between text-emerald-300"><span>CHIC10 discount:</span><span className="font-mono">âˆ’ GHâ‚µ {orderDiscount.toFixed(2)}</span></div>}
+                      {orderDiscount > 0 && <div className="flex justify-between text-emerald-300"><span>CHIC10 discount:</span><span className="font-mono">âˆ’ {formatCurrency(orderDiscount.toFixed(2))}</span></div>}
                       <label className="block text-[10px] font-bold text-slate-300">Coupon code<input value={checkoutData.couponCode} onChange={event => setCheckoutData({ ...checkoutData, couponCode: event.target.value.toUpperCase() })} placeholder="CHIC10" className="mt-1 min-h-10 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 text-xs text-white placeholder:text-slate-400" /></label>
                       <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-sm">
                         <span className="font-bold text-rose-400">Total Amount:</span>
-                        <span className="text-lg font-black font-mono text-white">GHâ‚µ {orderTotal}</span>
+                        <span title="GHS · Ghana cedi" className="text-lg font-black font-mono text-white">{formatCurrency(orderTotal)}</span>
                       </div>
                     </div>
                   </div>
@@ -1403,34 +1451,26 @@ export default function App() {
             )}
 
             {orderStage !== 'idle' && (
-              <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-3xl text-center space-y-4">
-                <div className="w-14 h-14 bg-emerald-600 text-white rounded-2xl flex items-center justify-center mx-auto text-xl shadow-lg">
-                  <i className="fa-solid fa-check"></i>
-                </div>
+              <div className="rounded-3xl border border-amber-200 bg-white p-6 text-center shadow-sm space-y-4">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-yellow-100 text-3xl">?</div>
                 <div>
-                  <h4 className="font-serif font-bold text-lg text-emerald-900">Order Submitted Successfully!</h4>
-                  <p className="text-xs text-emerald-700 mt-1">Your order has been sent to Rabi's admin dashboard. Once approved, the live Google Maps map will track your delivery.</p>
-                  <p className="text-xs text-emerald-700 mt-1">Order {selectedOrderForTracking?.id} Â· Invoice email: {selectedOrderForTracking?.notificationStatus?.customerEmail === 'sent' ? 'sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'queued' ? 'being sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'failed' ? 'could not be sent' : 'email service needs setup'}</p>
-                  {selectedOrderForTracking?.invoice && <div className="mx-auto max-w-md rounded-2xl border border-emerald-200 bg-white p-4 text-left text-xs text-slate-700">
+                  <h4 className="mt-4 text-lg font-bold text-slate-900">Order Submitted! Waiting for Admin Approval</h4>
+                  <p className="mt-2 text-sm text-slate-600">Your tracking code: <span className="font-mono font-bold text-black">{selectedOrderForTracking?.trackingCode || selectedOrderForTracking?.id}</span> <button onClick={() => navigator.clipboard?.writeText(selectedOrderForTracking?.trackingCode || selectedOrderForTracking?.id)} className="ml-1 underline">Copy</button></p>
+                  <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-gray-100"><div className="h-full w-[70%] animate-pulse rounded-full bg-black" /></div>
+                  <p className="mt-3 text-xs text-slate-600">Progress: Waiting for Rabis Chic to approve ? Then map will open automatically</p>
+                  <p className="mt-2 text-xs text-gray-400">{approvalNotice || 'You will get a notice when approved.'}</p>
+                  <p className="mt-2 text-xs text-slate-500">Order {selectedOrderForTracking?.id} ? Invoice email: {selectedOrderForTracking?.notificationStatus?.customerEmail === 'sent' ? 'sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'queued' ? 'being sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'failed' ? 'could not be sent' : 'email service needs setup'}</p>
+                  {selectedOrderForTracking?.invoice && <div className="mx-auto max-w-md rounded-2xl border border-amber-100 bg-slate-50 p-4 text-left text-xs text-slate-700">
                     <p className="font-bold text-slate-900">Invoice for {selectedOrderForTracking.items}</p>
-                    <p className="mt-1">Quantity: {selectedOrderForTracking.quantity} Â· Delivery: GHâ‚µ {selectedOrderForTracking.invoice.deliveryFee}</p>
-                    <p className="mt-1 font-black text-emerald-800">Total: GHâ‚µ {selectedOrderForTracking.invoice.total}</p>
+                    <p className="mt-1">Quantity: {selectedOrderForTracking.quantity} ? Delivery: {formatCurrency(selectedOrderForTracking.invoice.deliveryFee)}</p>
+                    <p className="mt-1 font-black text-slate-900">Total: {formatCurrency(selectedOrderForTracking.invoice.total)}</p>
                     <p className="mt-1 text-slate-500">A copy will be sent to {selectedOrderForTracking.email} by email.</p>
                   </div>}
                 </div>
                 <div className="flex flex-wrap justify-center gap-3 pt-2">
-                  <button 
-                    onClick={() => setActiveView('tracker')}
-                    className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow transition"
-                  >
-                    <i className="fa-solid fa-map-location-dot mr-1.5"></i> Open Live Map
-                  </button>
-                  <button 
-                    onClick={() => setOrderStage('idle')}
-                    className="px-5 py-3 bg-white hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-2xl border border-emerald-300 transition"
-                  >
-                    Place Another Order
-                  </button>
+                  <button onClick={() => { const code = selectedOrderForTracking?.trackingCode; if (code) { window.history.pushState({}, '', `/track?code=${encodeURIComponent(code)}`); setRoutePath('/track'); } }} className="min-h-12 rounded-full bg-slate-950 px-5 py-3 text-xs font-bold text-white shadow transition">Check Approval Status</button>
+                  <button onClick={() => setActiveView('tracker')} disabled={selectedOrderForTracking?.approvalStatus !== 'approved'} className="min-h-12 rounded-full border border-slate-300 px-5 py-3 text-xs font-bold text-slate-700 disabled:opacity-40">Open Live Map</button>
+                  <button onClick={() => { setOrderStage('idle'); setApprovalNotice(''); }} className="min-h-12 rounded-full border border-slate-300 px-5 py-3 text-xs font-bold text-slate-700">Place Another Order</button>
                 </div>
               </div>
             )}
@@ -1444,7 +1484,9 @@ export default function App() {
       )}
 
       {/* LIVE TRACKING MAP VIEW */}
-      {activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
+      {activeView === 'tracker' && (activeTrackingOrder?.approvalStatus === 'pending_approval' || (!activeTrackingOrder?.approvalStatus && String(activeTrackingOrder?.status || '').includes('Pending')))
+        ? <ApprovalStatus trackingCode={activeTrackingOrder?.trackingCode} onApproved={order => { setSelectedOrderForTracking(order); setOrders(current => [order, ...current.filter(item => item.id !== order.id)]); window.history.replaceState({}, '', `/track?order=${encodeURIComponent(order.id)}&autoOpenMap=true`); setRoutePath('/track'); }} />
+        : activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
 
       {/* LOOKUP VIEW */}
       {activeView === 'lookup' && (
@@ -1496,7 +1538,7 @@ export default function App() {
               <div className="space-y-2 text-xs text-slate-600">
                 <p>ðŸ“¦ <strong>Items:</strong> {lookupResult.items} (Qty: {lookupResult.quantity})</p>
                 <p>ðŸ“ <strong>Hostel Destination:</strong> {lookupResult.hostel} â€” Room: {lookupResult.room}</p>
-                <p>ðŸ’° <strong>Total Amount:</strong> GHâ‚µ {lookupResult.amount}</p>
+                <p>ðŸ’° <strong>Total Amount:</strong> {formatCurrency(lookupResult.amount)}</p>
               </div>
               <button onClick={() => { setSelectedOrderForTracking(lookupResult); setActiveView('tracker'); }} className="rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white">
                 <i className="fa-solid fa-map-location-dot mr-2"></i>Track delivery
@@ -1856,7 +1898,7 @@ export default function App() {
                         <p className="text-xs text-slate-500 mt-1">Review incoming customer hostel orders and approve to start live GPS delivery map.</p>
                       </div>
                       <span className="bg-rose-100 text-rose-700 text-xs font-bold px-3 py-1.5 rounded-xl">
-                        {orders.length} Total Orders
+                        {orders.filter(order => order.approvalStatus === 'pending_approval' || (!order.approvalStatus && String(order.status).includes('Pending'))).length} new orders waiting approval · {orders.length} total
                       </span>
                     </div>
 
@@ -1870,12 +1912,14 @@ export default function App() {
                           <div key={order.id} className="bg-white/90 backdrop-blur-md p-5 rounded-3xl border border-rose-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-rose-300 transition">
                             <div className="space-y-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-xs bg-rose-50 text-rose-600 px-2.5 py-1 rounded-lg">{order.id}</span>
+                                <span title={order.id} className="max-w-[140px] truncate font-mono font-bold text-xs bg-rose-50 text-rose-600 px-2.5 py-1 rounded-lg">{order.id}</span>
+                                {(order.approvalStatus === 'pending_approval' || (!order.approvalStatus && String(order.status).includes('Pending'))) && <span className="shrink-0 rounded-full bg-yellow-100 px-2.5 py-1 text-[10px] font-bold text-amber-900">⏳ Waiting Approval</span>}
+                                {(order.approvalStatus === 'pending_approval' || (!order.approvalStatus && String(order.status).includes('Pending'))) && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">1</span>}
                                 <span className="text-xs font-bold text-slate-900">{order.customer}</span>
                                 <span className="text-xs text-slate-400">({order.phone})</span>
                               </div>
                               <p className="text-xs text-slate-700 font-medium">
-                                ðŸ“¦ <strong className="text-slate-900">{order.items}</strong> (Qty: {order.quantity}) â€” Total: <strong className="text-rose-600">GHâ‚µ {order.amount}</strong>
+                                ðŸ“¦ <strong className="text-slate-900">{order.items}</strong> (Qty: {order.quantity}) â€” Total: <strong className="text-rose-600">{formatCurrency(order.amount)}</strong>
                               </p>
                               <p className="text-[11px] text-slate-500">
                                 ðŸ“ Hostel Location: <strong className="text-slate-800">{order.hostel} â€” Room: {order.room}</strong>
@@ -1899,9 +1943,10 @@ export default function App() {
                                   onClick={() => handleAdminApproveOrder(order.id)}
                                   className="w-full md:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-2xl shadow-md transition flex items-center justify-center gap-1.5"
                                 >
-                                  <i className="fa-solid fa-circle-check"></i> Approve & Start Delivery
+                                  <i className="fa-solid fa-circle-check"></i> Approve & Enable Tracking
                                 </button>
                               )}
+                              {(order.approvalStatus === 'pending_approval' || (!order.approvalStatus && String(order.status).includes('Pending'))) && <button onClick={() => handleAdminRejectOrder(order.id)} className="min-h-11 rounded-2xl border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-600">Reject</button>}
                               <a
                                 href={whatsappLink(order.phone, `Hello ${order.customer}, regarding your order ${order.id} at UCC.`)}
                                 target="_blank"
@@ -1988,7 +2033,7 @@ export default function App() {
                         <input 
                           type="number"
                           required
-                          placeholder="Price (GHâ‚µ)..."
+                          placeholder="Price (GH₵)..."
                           value={newProdPrice}
                           onChange={(e) => setNewProdPrice(e.target.value)}
                           className="px-4 py-2.5 rounded-xl border border-rose-200 text-xs font-bold bg-white"
@@ -2039,7 +2084,7 @@ export default function App() {
                               <span className="text-xs font-bold text-slate-800 line-clamp-1">{p.name}</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-xs text-slate-400 font-bold">GHâ‚µ</span>
+                              <span className="text-xs text-slate-400 font-bold">GH₵</span>
                               <input 
                                 type="number"
                                 value={p.price}
