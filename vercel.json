@@ -20,11 +20,11 @@
     },
     {
       "src": "^/admin-secret-login-rabis2024$",
-      "dest": "/dist/index.html"
+      "dest": "/index.html"
     },
     {
       "src": "^/admin(?:/.*)?$",
-      "dest": "/dist/index.html"
+      "dest": "/index.html"
     },
     {
       "src": "/(.*)",
