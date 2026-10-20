@@ -1,42 +1,64 @@
-import { LogOut } from 'lucide-react';
+import { ArrowRight, BarChart3, Box, CheckCircle2, FileImage, LogOut, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-const NAV_ITEMS = [
-  ['/admin/overview', 'Overview', 'fa-chart-pie'],
-  ['/admin/products', 'Products', 'fa-boxes-stacked'],
-  ['/admin/orders', 'Orders', 'fa-circle-check'],
-  ['/admin/users', 'Users', 'fa-users'],
-  ['/admin/content', 'Content', 'fa-pen-to-square'],
-  ['/admin/profile', 'Profile', 'fa-user-pen'],
-  ['/admin/settings', 'Settings', 'fa-sliders'],
+const GROUPS = [
+  {
+    title: 'Store Management',
+    items: [
+      ['/admin/overview', 'Overview', 'Stats, revenue', BarChart3],
+      ['/admin/products', 'Products', 'Add, edit, delete', Box],
+      ['/admin/orders', 'Orders', 'Manage orders', CheckCircle2],
+      ['/admin/users', 'Pending Users', 'Approve accounts', Users],
+      ['/admin/content', 'Content Manager', 'Hero, prices, images', FileImage],
+    ],
+  },
+  {
+    title: 'Account',
+    items: [
+      ['/admin/profile', 'Profile', 'Your info', UserRound],
+      ['/admin/settings', 'Settings', 'Site, email', Settings],
+    ],
+  },
 ];
 
-export default function AdminLayout({ adminProfile, orders = [], onNavigate, onLogout, children }) {
+export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
   const { user } = useAuth();
-  const navigate = (path) => onNavigate?.(path);
+  const email = user?.email || localStorage.getItem('rabi_user_email') || 'Admin account';
+  const avatar = adminProfile?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(adminProfile?.name || email)}&background=e11d48&color=fff`;
 
   return (
-    <div className="min-h-screen bg-rose-50/40 px-4 py-6 text-slate-800">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-white px-5 py-4 shadow-sm">
-          <div className="flex items-center gap-3">
-            <img src={adminProfile?.avatar} alt="" className="h-11 w-11 rounded-xl object-cover" />
-            <div><h1 className="font-serif text-lg font-bold text-slate-900">Rabis Chic Admin</h1><p className="text-xs text-slate-500">{user?.email}</p></div>
-          </div>
-          <a href="/" target="_blank" rel="noreferrer" className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700">View Store ↗</a>
-        </header>
-        <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-4">
-          <aside className="space-y-2 rounded-3xl border border-white/80 bg-white/80 p-4 shadow-sm">
-            <div className="mb-3 flex items-center gap-3 border-b border-rose-100 px-3 pb-4">
-              <img src={adminProfile?.avatar} alt={`${adminProfile?.name || 'Admin'} profile`} className="h-11 w-11 rounded-full object-cover" />
-              <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{adminProfile?.name || 'Administrator'}</p><p className="truncate text-[11px] text-slate-500">{user?.email}</p></div>
+    <div className="min-h-screen bg-[#f0f2f5] px-4 py-6 text-slate-800">
+      <main className="mx-auto max-w-2xl space-y-5">
+        <button type="button" onClick={() => onNavigate?.('/admin/profile')} className="flex w-full items-center gap-4 rounded-xl bg-white p-4 text-left shadow-sm hover:bg-gray-50">
+          <img src={avatar} alt="Admin profile" className="h-14 w-14 rounded-full object-cover" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-bold text-slate-900">{adminProfile?.name || 'Admin Profile'}</span>
+            <span className="block truncate text-sm text-slate-500">{email}</span>
+            <span className="mt-1 block text-xs text-slate-500">Be an Eagle not a Chicken</span>
+          </span>
+          <ArrowRight className="text-slate-400" size={20} />
+        </button>
+
+        {GROUPS.map(group => (
+          <section key={group.title}>
+            <h2 className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-500">{group.title}</h2>
+            <div className="overflow-hidden rounded-xl bg-white shadow-sm">
+              {group.items.map(([path, label, description, Icon], index) => (
+                <button key={path} type="button" onClick={() => onNavigate?.(path)} className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 ${index < group.items.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600"><Icon size={18} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-800">{label}</span><span className="block text-xs text-slate-500">{description}</span></span>
+                  <ArrowRight className="text-slate-400" size={18} />
+                </button>
+              ))}
             </div>
-            {NAV_ITEMS.map(([path, label, icon]) => <button key={path} onClick={() => navigate(path)} className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-bold ${window.location.pathname === path ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-rose-50'}`}><span><i className={`fa-solid ${icon} mr-3`} />{label}</span>{path === '/admin/orders' && orders.length > 0 && <span className="rounded-full bg-rose-500 px-2 py-0.5 text-white">{orders.length}</span>}</button>)}
-            <button onClick={onLogout} className="mt-3 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-xs font-bold text-rose-700 hover:bg-rose-50"><LogOut size={15} /> Log out</button>
-          </aside>
-          <main className="min-w-0 md:col-span-3">{children}</main>
-        </div>
-      </div>
+          </section>
+        ))}
+
+        <button type="button" onClick={onLogout} className="flex w-full items-center justify-center gap-2 rounded-xl bg-white p-4 text-sm font-bold text-red-600 shadow-sm hover:bg-red-50">
+          <LogOut size={17} /> Log Out
+        </button>
+        <p className="flex items-center justify-center gap-1 text-center text-xs text-slate-400"><ShieldCheck size={14} /> Administrator access</p>
+      </main>
     </div>
   );
 }

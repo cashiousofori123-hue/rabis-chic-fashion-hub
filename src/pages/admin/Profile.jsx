@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import AdminPageShell from './AdminPageShell';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Profile() {
+  const { user } = useAuth();
   const [profile,  setProfile]  = useState({ name: '', title: '', bio: '', avatar: '' });
   const [saving,   setSaving]   = useState(false);
   const [message,  setMessage]  = useState('');
@@ -42,6 +45,11 @@ export default function Profile() {
   };
 
   return (
+    <AdminPageShell title="Profile">
+    <section className="flex items-center gap-4 rounded-xl bg-white p-4 shadow-sm">
+      {profile.avatar && <img src={profile.avatar} alt="Admin profile" className="h-16 w-16 rounded-full object-cover" />}
+      <div><p className="font-bold text-slate-900">{profile.name || 'Administrator'}</p><p className="text-sm text-slate-500">{user?.email}</p><p className="text-xs capitalize text-slate-500">Role: {user?.role || 'admin'} · Status: active</p></div>
+    </section>
     <form onSubmit={handleSave}
       className="max-w-2xl space-y-6 rounded-2xl border border-rose-100 bg-white/80 p-6 md:p-8">
       <div>
@@ -92,5 +100,6 @@ export default function Profile() {
         {saving ? 'Saving…' : 'Save and publish profile'}
       </button>
     </form>
+    </AdminPageShell>
   );
 }

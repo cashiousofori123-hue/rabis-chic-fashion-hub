@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import AdminPageShell from './AdminPageShell';
 
 export default function PendingUsers() {
   const [pendingUsers, setPendingUsers] = useState([]);
@@ -15,7 +16,8 @@ export default function PendingUsers() {
   };
 
   return (
-    <div className="bg-white/80 p-6 md:p-8 rounded-2xl border border-rose-100 space-y-4">
+    <AdminPageShell title="Pending Users">
+    <div className="bg-white/80 p-6 md:p-8 rounded-xl border border-rose-100 space-y-4">
       <h3 className="font-serif font-bold text-xl text-slate-900">Pending Accounts</h3>
       <p className="text-xs text-slate-500">Approve or promote accounts waiting for access.</p>
 
@@ -45,5 +47,6 @@ export default function PendingUsers() {
         </div>
       ))}
     </div>
+    </AdminPageShell>
   );
 }

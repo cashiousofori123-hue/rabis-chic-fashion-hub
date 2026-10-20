@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
+import AdminPageShell from './AdminPageShell';
 
 export default function Settings({ adminContact, setAdminContact, transferEmail, setTransferEmail }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState('');
 
@@ -23,7 +24,14 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
   };
 
   return (
+    <AdminPageShell title="Settings">
     <div className="space-y-6">
+      <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <label className="mb-1 block text-xs font-bold uppercase text-slate-500">Site name</label>
+        <input readOnly value="Rabis Chic Fashion Hub" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <label className="mb-1 mt-3 block text-xs font-bold uppercase text-slate-500">Admin email</label>
+        <input readOnly value={user?.email || ''} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+      </div>
       {/* Contact settings */}
       <form onSubmit={saveContact}
         className="bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm space-y-4">
@@ -64,5 +72,6 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
         </form>
       </div>
     </div>
+    </AdminPageShell>
   );
 }

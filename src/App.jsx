@@ -108,9 +108,6 @@ export default function App() {
     if (routePath.startsWith('/admin') && routePath !== '/admin-secret-login-rabis2024' && authReady && (!user || role !== 'admin')) {
       window.history.replaceState({}, '', '/');
       setRoutePath('/');
-    } else if (routePath === '/admin' && authReady && user?.role === 'admin') {
-      window.history.replaceState({}, '', '/admin/overview');
-      setRoutePath('/admin/overview');
     }
   }, [routePath, authReady, user, role]);
 
@@ -601,7 +598,7 @@ export default function App() {
 
   if (routePath === '/admin-secret-login-rabis2024') {
     return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }} />
+      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
   }
 
@@ -609,7 +606,7 @@ export default function App() {
     if (!authReady) return <div className="min-h-screen bg-rose-50/40" />;
     if (!user || role !== 'admin') return null;
     if (!adminUnlocked) return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }} />
+      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
     const pages = {
       '/admin/overview': <Overview />,
@@ -620,13 +617,11 @@ export default function App() {
       '/admin/profile': <ProfilePage />,
       '/admin/settings': <SettingsPage adminContact={adminContact} setAdminContact={setAdminContact} transferEmail={transferEmail} setTransferEmail={setTransferEmail} />,
     };
-    const path = routePath === '/admin' ? '/admin/overview' : routePath;
     return <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
-      <AdminLayoutComp adminProfile={adminProfile} orders={orders} messages={messages}
+      {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
         onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
-        onLogout={() => { logout(); window.history.replaceState({}, '', '/'); setRoutePath('/'); }}>
-        {pages[path] || pages['/admin/overview']}
-      </AdminLayoutComp>
+        onLogout={() => { logout(); window.history.replaceState({}, '', '/'); setRoutePath('/'); }} />
+        : pages[routePath] || pages['/admin/overview']}
     </Suspense>;
   }
 
@@ -819,7 +814,7 @@ export default function App() {
             {/* Only an authenticated administrator sees the dashboard link. */}
             {isAdminAccount && (
               <button
-                onClick={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }}
+                onClick={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }}
                 className="px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
                 <i className="fa-solid fa-user-shield"></i> Visit Admin Dashboard

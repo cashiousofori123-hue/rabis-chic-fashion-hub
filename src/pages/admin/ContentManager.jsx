@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import AdminPageShell from './AdminPageShell';
 
 const DEFAULT_CONTENT = {
   hero: {
@@ -41,6 +42,7 @@ export default function ContentManager() {
   const featuredIds = (content.featured?.productIds || []).join(', ');
 
   return (
+    <AdminPageShell title="Content Manager">
     <form onSubmit={save}
       className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm">
       <div>
@@ -169,5 +171,6 @@ export default function ContentManager() {
         {saving ? 'Saving…' : 'Save Homepage Content'}
       </button>
     </form>
+    </AdminPageShell>
   );
 }

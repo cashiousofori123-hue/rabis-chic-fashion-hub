@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import AdminPageShell from './AdminPageShell';
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
@@ -28,7 +29,8 @@ export default function Orders() {
   };
 
   return (
-    <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm">
+    <AdminPageShell title="Orders">
+    <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-xl border border-white/80 shadow-sm">
       <div className="flex justify-between items-center">
         <div>
           <h3 className="font-serif font-bold text-xl text-slate-900">Order Approvals &amp; Dispatch</h3>
@@ -90,5 +92,6 @@ export default function Orders() {
         ))}
       </div>
     </div>
+    </AdminPageShell>
   );
 }

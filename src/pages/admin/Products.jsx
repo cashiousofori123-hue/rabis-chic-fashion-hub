@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import AdminPageShell from './AdminPageShell';
 
 const ALL_CATEGORIES = [
   'Dresses','Bags','Footwear','Lip balm','Face mask','Eye mask',
@@ -50,7 +51,8 @@ export default function Products() {
   };
 
   return (
-    <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm">
+    <AdminPageShell title="Products">
+    <div className="space-y-6 bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-xl border border-white/80 shadow-sm">
       <h3 className="font-serif font-bold text-xl text-slate-900">Manage Store Catalog &amp; Prices</h3>
 
       {/* Add product form */}
@@ -105,5 +107,6 @@ export default function Products() {
         </div>
       </div>
     </div>
+    </AdminPageShell>
   );
 }
