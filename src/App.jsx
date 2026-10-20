@@ -111,6 +111,7 @@ export default function App() {
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [hasActiveAdmin, setHasActiveAdmin] = useState(null);
   const [adminSessionOnThisDevice, setAdminSessionOnThisDevice] = useState(false);
+  const [adminLogoutNotice, setAdminLogoutNotice] = useState(false);
   const [adminLogoutStep, setAdminLogoutStep] = useState(0);
   const [adminLogoutPassword, setAdminLogoutPassword] = useState('');
   const [adminLogoutPasswordVisible, setAdminLogoutPasswordVisible] = useState(false);
@@ -558,6 +559,7 @@ export default function App() {
       await confirmAdminLogout(adminLogoutPassword);
       setHasActiveAdmin(false);
       setAdminSessionOnThisDevice(false);
+      setAdminLogoutNotice(true);
       setAdminLogoutStep(0);
       setAdminLogoutPassword('');
       window.history.replaceState({}, '', '/');
@@ -1179,6 +1181,7 @@ export default function App() {
           <div className="order-2 lg:order-3 flex shrink-0 items-center gap-1 lg:gap-2 max-w-full pb-0">
             <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="hidden lg:grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><SearchIcon size={18} /></button>
             <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="hidden lg:grid relative h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
+            {hasActiveAdmin === false && <button type="button" onClick={() => { setAdminLogoutNotice(false); navigateTo('/rabis-admin-secure-2024'); }} className="hidden min-h-10 shrink-0 items-center rounded-full border border-rose-200 bg-rose-50 px-3 text-[11px] font-bold text-rose-800 transition hover:border-rose-300 hover:bg-rose-100 lg:flex">Admin Sign In</button>}
             <button onClick={() => { navigateTo('/shop'); window.setTimeout(() => document.getElementById('order-checkout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120); }} aria-label="Go to order checkout" title="Cart / checkout" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><ShoppingBag size={18} /><span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{checkoutData.quantity || 0}</span></button>
 
             <button onClick={() => setMobileMenuOpen(value => !value)} aria-label="Open navigation" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 lg:hidden">{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
@@ -1195,8 +1198,15 @@ export default function App() {
           </div>
         </div>
         <nav aria-label="Mobile primary navigation" className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto bg-white px-3 pb-2 lg:hidden">{[['🛍️ Shop', '/shop'], ['📍 Track Order', '/track'], ['ℹ️ About', '/about'], ['✉️ Contact', '/contact']].map(([label, path]) => <button key={path} onClick={() => navigateTo(path)} className={`min-h-10 shrink-0 snap-start rounded-full border px-4 text-xs transition ${isNavActive(path) ? 'border-black bg-gray-100 font-bold text-black' : 'border-gray-200 bg-white font-semibold text-slate-700'}`}>{label}</button>)}</nav>
-        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div>{isAdminAuthenticated && <div className="fixed inset-x-4 bottom-4 border-t border-slate-100 bg-white pt-3"><button onClick={() => navigateTo('/admin')} className="min-h-11 w-full rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button></div>}</nav>}
+        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div>{hasActiveAdmin === false && <button onClick={() => { setMobileMenuOpen(false); setAdminLogoutNotice(false); navigateTo('/rabis-admin-secure-2024'); }} className="mt-6 min-h-12 w-full rounded-xl border border-rose-200 bg-rose-50 text-sm font-bold text-rose-800">Admin Sign In</button>}{isAdminAuthenticated && <div className="fixed inset-x-4 bottom-4 border-t border-slate-100 bg-white pt-3"><button onClick={() => navigateTo('/admin')} className="min-h-11 w-full rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button></div>}</nav>}
       </header>
+
+      {adminLogoutNotice && <div role="status" className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-rose-950">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
+          <p className="text-sm"><span className="font-bold">Admin signed out.</span> The store is ready for the next admin sign in.</p>
+          <div className="flex items-center gap-2"><button type="button" onClick={() => { setAdminLogoutNotice(false); navigateTo('/rabis-admin-secure-2024'); }} className="min-h-9 rounded-full bg-rose-700 px-4 text-xs font-bold text-white hover:bg-rose-800">Admin Sign In</button><button type="button" onClick={() => setAdminLogoutNotice(false)} aria-label="Dismiss sign-out notice" className="grid h-9 w-9 place-items-center rounded-full text-rose-800 hover:bg-rose-100"><X size={16} /></button></div>
+        </div>
+      </div>}
 
       {siteContent?.noticeBar?.active && siteContent.noticeBar.text && <div role="status" className={`px-4 py-2 text-center text-xs font-semibold ${siteContent.noticeBar.type === 'sale' ? 'bg-black text-white' : siteContent.noticeBar.type === 'out_of_stock' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>{siteContent.noticeBar.text}</div>}
 
@@ -1206,19 +1216,19 @@ export default function App() {
 
           {/* HERO BANNER SLIDESHOW */}
           <div className="relative w-full h-64 sm:h-80 md:h-96 rounded-3xl overflow-hidden shadow-xl bg-slate-900" onMouseEnter={() => setHeroPaused(true)} onMouseLeave={() => setHeroPaused(false)} onTouchStart={event => { event.currentTarget.dataset.touchX = String(event.touches[0].clientX); }} onTouchEnd={event => { const start = Number(event.currentTarget.dataset.touchX); const dx = event.changedTouches[0].clientX - start; if (Math.abs(dx) > 45 && slides.length > 1) setCurrentSlideIndex(index => (index + (dx < 0 ? 1 : slides.length - 1)) % slides.length); }}>
-            {slides.length > 0 && (
-              <div className="absolute inset-0 flex transition-transform duration-500 ease-in-out" style={{ width: `${slides.length * 100}%`, transform: `translateX(-${currentSlideIndex * (100 / slides.length)}%)` }}>
-                {slides.map((slide, index) => <article key={slide.id || index} className="relative h-full shrink-0" style={{ width: `${100 / slides.length}%` }}>
-                  <img src={slide.url} className="absolute inset-0 h-full w-full object-cover opacity-90" alt={slide.title || 'Rabis Chic collection'} />
-                  <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-slate-950/80 via-transparent to-transparent p-5 text-white md:p-8">
-                    <span className="mb-2 w-max rounded-full bg-rose-500 px-3 py-1 text-[9px] font-extrabold uppercase tracking-wider text-white md:text-[10px]">{slide.badge && slide.badge !== 'None' ? slide.badge : 'UCC Campus Exclusive'}</span>
-                    <h2 className="text-2xl font-serif font-bold leading-tight sm:text-3xl md:text-4xl">{slide.title || publicHero.title}</h2>
-                    <p className="mt-1 text-xs text-rose-100 md:text-sm">{slide.subtitle || publicHero.subtitle || 'Fast UCC hostel delivery with live GPS tracking.'}</p>
-                    <a href={slide.buttonLink || publicHero.ctaLink || '#store'} className="mt-4 inline-flex w-max items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-slate-800">{slide.buttonText || publicHero.ctaText || 'Shop Now'}</a>
-                  </div>
-                </article>)}
-              </div>
-            )}
+            {slides.length > 0 && (() => {
+              const slide = slides[currentSlideIndex] || slides[0];
+              return <article key={`${slide.id || currentSlideIndex}-${currentSlideIndex}`} className="hero-slide-enter absolute inset-0">
+                <img src={slide.url} loading={currentSlideIndex === 0 ? 'eager' : 'lazy'} decoding="async" fetchPriority={currentSlideIndex === 0 ? 'high' : 'auto'} className="absolute inset-0 h-full w-full object-cover" alt={slide.title || 'Rabis Chic collection'} />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/10 to-transparent" />
+                <div className="absolute inset-x-0 bottom-0 flex flex-col items-start p-5 text-white sm:p-7 md:p-9">
+                  {slide.badge && slide.badge !== 'None' && <span className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-rose-200">{slide.badge}</span>}
+                  <h2 className="max-w-2xl font-serif text-2xl font-bold leading-tight sm:text-3xl md:text-4xl">{slide.title || publicHero.title}</h2>
+                  {Boolean(slide.subtitle || publicHero.subtitle) && <p className="mt-1 line-clamp-2 max-w-xl text-xs text-white/85 sm:text-sm">{slide.subtitle || publicHero.subtitle}</p>}
+                  <a href={slide.buttonLink || publicHero.ctaLink || '#store'} className="mt-3 inline-flex min-h-10 items-center rounded-xl bg-white px-4 py-2 text-xs font-bold text-slate-950 shadow-lg transition hover:bg-rose-50">{slide.buttonText || publicHero.ctaText || 'Shop Now'}</a>
+                </div>
+              </article>;
+            })()}
             {slides.length > 1 && <button aria-label="Previous slide"
               onClick={() => setCurrentSlideIndex((currentSlideIndex - 1 + slides.length) % slides.length)}
               className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-slate-900 transition hover:bg-white"

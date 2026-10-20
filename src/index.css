@@ -21,6 +21,15 @@
   animation: spinRadar 4s linear infinite;
 }
 
+@keyframes heroSlideFade {
+  from { opacity: 0.72; transform: scale(1.01); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.hero-slide-enter {
+  animation: heroSlideFade 500ms ease-out both;
+}
+
 @media print {
   body * { visibility: hidden; }
   #invoiceModal, #invoiceModal * { visibility: visible; }
