@@ -356,7 +356,8 @@ def claim_admin_session(session: dict[str, Any], now_iso: str) -> tuple[bool, di
         cursor.execute("SELECT payload FROM admin_sessions WHERE session_slot = 1 FOR UPDATE")
         row = cursor.fetchone()
         current = row[0] if row else {}
-        if current.get("isActive") and current.get("expiresAt", "") > now_iso and current.get("deviceFingerprint") != session.get("deviceFingerprint"):
+        active_expiry = current.get("expiresAt")
+        if current.get("isActive") and (not active_expiry or active_expiry > now_iso) and current.get("deviceFingerprint") != session.get("deviceFingerprint"):
             return False, current
         cursor.execute("UPDATE admin_sessions SET payload = %s WHERE session_slot = 1", (_json(session),))
         return True, session

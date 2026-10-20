@@ -3,8 +3,6 @@ import api from '../api';
 import { getDeviceIdentity } from '../utils/deviceIdentity';
 
 const AuthContext = createContext(null);
-const ADMIN_UNLOCK_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000;
-
 export function AuthProvider({ children }) {
   const [authReady, setAuthReady] = useState(() => !localStorage.getItem('rabi_access_token'));
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -45,13 +43,11 @@ export function AuthProvider({ children }) {
         setAdminUnlocked(Boolean(data.valid && data.isOwnDevice));
         if (!data.valid || !data.isOwnDevice) {
           localStorage.removeItem('rabi_admin_access_token');
-          localStorage.removeItem('rabi_admin_unlocked_until');
         }
       })
       .catch(() => {
         if (!active) return;
         localStorage.removeItem('rabi_admin_access_token');
-        localStorage.removeItem('rabi_admin_unlocked_until');
         setAdminUnlocked(false);
       })
       .finally(() => { if (active) setAdminSessionReady(true); });
@@ -60,7 +56,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const syncAdminUnlock = (event) => {
-      if (event.key && !['rabi_admin_access_token', 'rabi_admin_unlocked_until'].includes(event.key)) return;
+      if (event.key && event.key !== 'rabi_admin_access_token') return;
       if (!localStorage.getItem('rabi_admin_access_token')) { setAdminUnlocked(false); setAdminSessionReady(true); return; }
       api.get('/admin/session/check').then(({ data }) => setAdminUnlocked(Boolean(data.valid && data.isOwnDevice))).catch(() => setAdminUnlocked(false));
     };
@@ -76,10 +72,8 @@ export function AuthProvider({ children }) {
     localStorage.setItem('rabi_access_token', data.access_token);
     if (data.admin_access_token) {
       localStorage.setItem('rabi_admin_access_token', data.admin_access_token);
-      localStorage.setItem('rabi_admin_unlocked_until', String(Date.now() + ADMIN_UNLOCK_TIMEOUT_MS));
     } else {
       localStorage.removeItem('rabi_admin_access_token');
-      localStorage.removeItem('rabi_admin_unlocked_until');
     }
     localStorage.setItem('rabi_user', JSON.stringify(data.user));
     setUser(data.user);
@@ -99,7 +93,6 @@ export function AuthProvider({ children }) {
     });
     localStorage.setItem('rabi_access_token', data.access_token);
     localStorage.setItem('rabi_admin_access_token', data.admin_access_token);
-    localStorage.setItem('rabi_admin_unlocked_until', String(Date.now() + 30 * 24 * 60 * 60 * 1000));
     localStorage.setItem('rabi_user', JSON.stringify(data.user));
     setUser(data.user);
     setAdminUnlocked(true);
@@ -108,15 +101,9 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
-  const signup = async (email, password, name) => {
-    const { data } = await api.post('/signup', { email, password, name });
-    return data;
-  };
-
   const clearLocalSession = () => {
     localStorage.removeItem('rabi_access_token');
     localStorage.removeItem('rabi_admin_access_token');
-    localStorage.removeItem('rabi_admin_unlocked_until');
     localStorage.removeItem('rabi_user');
     setUser(null);
     setAdminUnlocked(false);
@@ -140,7 +127,6 @@ export function AuthProvider({ children }) {
 
   const unlockAdmin = (token) => {
     localStorage.setItem('rabi_admin_access_token', token);
-    localStorage.setItem('rabi_admin_unlocked_until', String(Date.now() + ADMIN_UNLOCK_TIMEOUT_MS));
     setAdminUnlocked(true);
     setAdminSessionReady(true);
   };
@@ -148,7 +134,6 @@ export function AuthProvider({ children }) {
   const loginWithAdminPasskey = (session) => {
     localStorage.setItem('rabi_access_token', session.access_token);
     localStorage.setItem('rabi_admin_access_token', session.admin_access_token);
-    localStorage.setItem('rabi_admin_unlocked_until', String(Date.now() + ADMIN_UNLOCK_TIMEOUT_MS));
     localStorage.setItem('rabi_user', JSON.stringify(session.user));
     setUser(session.user);
     setAdminUnlocked(true);
@@ -158,13 +143,12 @@ export function AuthProvider({ children }) {
 
   const lockAdmin = () => {
     localStorage.removeItem('rabi_admin_access_token');
-    localStorage.removeItem('rabi_admin_unlocked_until');
     setAdminUnlocked(false);
     setAdminSessionReady(true);
   };
 
   return (
-    <AuthContext.Provider value={{ user, role: user?.role || null, authReady, adminUnlocked, adminSessionReady, login, loginAdmin, signup, logout, confirmAdminLogout, unlockAdmin, loginWithAdminPasskey, lockAdmin }}>
+    <AuthContext.Provider value={{ user, role: user?.role || null, authReady, adminUnlocked, adminSessionReady, login, loginAdmin, logout, confirmAdminLogout, unlockAdmin, loginWithAdminPasskey, lockAdmin }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MapContainer, Marker, TileLayer, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -12,6 +12,12 @@ L.Icon.Default.mergeOptions({
 
 function ClickToChoose({ onChoose }) {
   useMapEvents({ click: event => onChoose([event.latlng.lat, event.latlng.lng]) });
+  return null;
+}
+
+function KeepSelectionVisible({ position }) {
+  const map = useMap();
+  useEffect(() => { map.flyTo(position, Math.max(map.getZoom(), 16), { duration: 0.5 }); }, [map, position[0], position[1]]);
   return null;
 }
 
@@ -28,9 +34,10 @@ export default function CheckoutLocationPicker({ value, onSelect }) {
       const result = await response.json();
       address = result.display_name || address;
     } catch { /* Keep the coordinates as a usable delivery pin. */ }
-    onSelect({ lat: point[0], lng: point[1], address, isCustom: true, collectionPointLabel: 'Map pin' });
+    onSelect({ lat: point[0], lng: point[1], address, isCustom: true });
   };
   return <MapContainer center={center} zoom={16} className="h-52 w-full rounded-xl" scrollWheelZoom>
+    <KeepSelectionVisible position={center} />
     <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
     <ClickToChoose onChoose={choose} />
     <Marker position={pin} />

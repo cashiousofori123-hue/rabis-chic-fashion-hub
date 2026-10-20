@@ -375,7 +375,8 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
   const delivered = Boolean(order?.deliverySuccess) || order?.status?.toLowerCase().includes('delivered') || location?.status === 'Delivered';
   const progress = Math.min(100, Math.max(0, Number(location?.progress ?? order?.progress ?? 0)));
   const distanceMeters = location?.distanceMeters != null ? Number(location.distanceMeters) : riderPoint ? Math.round(distanceKm * 1000) : null;
-  const isSamePlace = Boolean(location?.isSamePlaceReached || (!delivered && distanceMeters != null && distanceMeters <= 20));
+  const destinationIsShared = Boolean(location?.destinationShared || order?.destinationShared || customerLocation);
+  const isSamePlace = Boolean(location?.isSamePlaceReached || (!delivered && destinationIsShared && distanceMeters != null && distanceMeters <= 20));
   const statusText = connectionMode === 'ws' ? 'Live GPS' : connectionMode === 'polling' ? 'Polling location' : 'Connecting to courier';
 
   useEffect(() => { setArrivalNoticeOpen(false); }, [order?.id]);
@@ -390,7 +391,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
 
   return (
     <main className="relative h-[100dvh] min-h-[560px] w-screen overflow-hidden bg-[#e9edf2] text-slate-800">
-      <style>{`@keyframes rabiPulse{0%{transform:scale(.45);opacity:.85}100%{transform:scale(1.55);opacity:0}}.rabi-blue-dot,.rabi-destination-pin,.rabi-rider-marker{background:transparent;border:0}`}</style>
+      <style>{`@keyframes rabiPulse{0%{transform:scale(.45);opacity:.85}100%{transform:scale(1.8);opacity:0}}.rabi-blue-dot,.rabi-destination-pin,.rabi-rider-marker{background:transparent;border:0}.rabi-rider-marker span{position:relative}.rabi-rider-marker span:before,.rabi-rider-marker span:after{content:"";position:absolute;inset:-8px;border:2px solid #7c3aed;border-radius:50%;pointer-events:none;animation:rabiPulse 1.8s ease-out infinite}.rabi-rider-marker span:after{animation-delay:.9s}`}</style>
       <div className="absolute inset-0">
         <MapContainer center={SHOP_POINT} zoom={14} className="h-full w-full" zoomControl={false} scrollWheelZoom>
           <FitMapOnce orderId={order.id} destination={destinationPoint} />

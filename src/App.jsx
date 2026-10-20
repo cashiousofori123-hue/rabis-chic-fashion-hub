@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { Fingerprint, LogOut, ShieldCheck, Menu, X, Heart, ShoppingBag, Search as SearchIcon, UserRound, ChevronDown, HelpCircle } from 'lucide-react';
+import { Fingerprint, LogOut, ShieldCheck, Menu, X, Heart, ShoppingBag, Search as SearchIcon, HelpCircle } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
 import { formatCurrency } from './utils/formatCurrency';
@@ -11,7 +11,6 @@ import WhatsAppButton from './components/WhatsAppButton';
 const SearchPage = lazy(() => import('./pages/Search'));
 const WishlistPage = lazy(() => import('./pages/Wishlist'));
 const FAQPage = lazy(() => import('./pages/FAQ'));
-const AccountPage = lazy(() => import('./pages/Account'));
 const TrackOrder      = lazy(() => import('./components/TrackOrder'));
 const CheckoutLocationPicker = lazy(() => import('./components/CheckoutLocationPicker'));
 const Overview        = lazy(() => import('./pages/admin/Overview'));
@@ -108,9 +107,10 @@ const optimizeProductImage = (imageUrl) => {
 };
 
 export default function App() {
-  const { user, role, authReady, adminUnlocked, adminSessionReady, login, loginAdmin, logout, confirmAdminLogout, unlockAdmin, lockAdmin } = useAuth();
+  const { user, role, authReady, adminUnlocked, adminSessionReady, loginAdmin, logout, confirmAdminLogout, unlockAdmin, lockAdmin } = useAuth();
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [hasActiveAdmin, setHasActiveAdmin] = useState(null);
+  const [adminSessionOnThisDevice, setAdminSessionOnThisDevice] = useState(false);
   const [adminLogoutStep, setAdminLogoutStep] = useState(0);
   const [adminLogoutPassword, setAdminLogoutPassword] = useState('');
   const [adminLogoutPasswordVisible, setAdminLogoutPasswordVisible] = useState(false);
@@ -123,7 +123,11 @@ export default function App() {
   }, []);
   useEffect(() => {
     let active = true;
-    const refresh = () => api.get('/admin/status').then(({ data }) => { if (active) setHasActiveAdmin(Boolean(data.hasActiveAdmin)); }).catch(() => { if (active) setHasActiveAdmin(true); });
+    const refresh = () => api.get('/admin/status').then(({ data }) => {
+      if (!active) return;
+      setHasActiveAdmin(Boolean(data.hasActiveAdmin));
+      setAdminSessionOnThisDevice(Boolean(data.isCurrentDevice));
+    }).catch(() => { if (active) { setHasActiveAdmin(true); setAdminSessionOnThisDevice(false); } });
     refresh();
     const timer = window.setInterval(refresh, 5000);
     return () => { active = false; window.clearInterval(timer); };
@@ -137,7 +141,6 @@ export default function App() {
 
   const [activeView, setActiveView] = useState('store'); // 'store', 'tracker', 'lookup', 'about', 'contact', 'admin'
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
 
   const [adminTab, setAdminTab] = useState('overview'); // 'overview', 'approvals', 'messages', 'catalog', 'contact', 'security'
@@ -254,7 +257,6 @@ export default function App() {
     email: '',
     hostel: 'Casely Hayford Hall',
     roomNumber: '',
-    collectionPointLabel: '',
     selectedProductId: 1,
     customItemName: '',
     quantity: 1,
@@ -267,20 +269,20 @@ export default function App() {
   });
   const detectedCustomerLocationRef = useRef(detectedCustomerLocation);
   const [checkoutLocationStatus, setCheckoutLocationStatus] = useState('');
-  const [locationSearchText, setLocationSearchText] = useState('');
+  const [locationSearchText, setLocationSearchText] = useState('Casely Hayford Hall');
   const [locationSuggestions, setLocationSuggestions] = useState([]);
   const [showCheckoutMap, setShowCheckoutMap] = useState(false);
   const customLocationSelectionRef = useRef(false);
 
   useEffect(() => {
-    if (routePath !== '/shop' || !navigator.geolocation) return undefined;
+    if (!['/', '/shop'].includes(routePath) || !navigator.geolocation) return undefined;
     let active = true;
     let watchId = null;
     setCheckoutLocationStatus('Detecting location automatically…');
     const saveLocation = async (coords, reverse = false) => {
       if (!active) return;
       if (customLocationSelectionRef.current && !reverse) return;
-      const location = { lat: coords.latitude, lng: coords.longitude, address: detectedCustomerLocationRef.current?.address || '', isCustom: false, collectionPointLabel: '' };
+      const location = { lat: coords.latitude, lng: coords.longitude, address: detectedCustomerLocationRef.current?.address || '', isCustom: false };
       if (reverse || !location.address) {
         try {
           const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.latitude}&lon=${coords.longitude}`);
@@ -304,7 +306,7 @@ export default function App() {
 
   useEffect(() => {
     const query = locationSearchText.trim();
-    if (query.length < 3) { setLocationSuggestions([]); return undefined; }
+    if (!['/', '/shop'].includes(routePath) || query.length < 3) { setLocationSuggestions([]); return undefined; }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
@@ -314,7 +316,7 @@ export default function App() {
       } catch { if (!controller.signal.aborted) setLocationSuggestions([]); }
     }, 500);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [locationSearchText]);
+  }, [locationSearchText, routePath]);
 
   const [orderStage, setOrderStage] = useState('idle');
   const [approvalNotice, setApprovalNotice] = useState('');
@@ -555,6 +557,7 @@ export default function App() {
     try {
       await confirmAdminLogout(adminLogoutPassword);
       setHasActiveAdmin(false);
+      setAdminSessionOnThisDevice(false);
       setAdminLogoutStep(0);
       setAdminLogoutPassword('');
       window.history.replaceState({}, '', '/');
@@ -588,8 +591,12 @@ export default function App() {
 
   const handlePlaceOrder = async (e) => {
     e.preventDefault();
-    if (!checkoutData.roomNumber || !checkoutData.name || !checkoutData.phone) {
-      alert("Please fill in your name, phone number, and specific room number.");
+    if (!checkoutData.roomNumber || !checkoutData.name || !checkoutData.phone || !checkoutData.hostel.trim()) {
+      alert("Please enter your name, phone number, hall or place, and room details.");
+      return;
+    }
+    if (!detectedCustomerLocation) {
+      alert("Choose a hall or place from the search results, allow location access, or select a delivery point on the map.");
       return;
     }
 
@@ -617,8 +624,6 @@ export default function App() {
         lng: Number(detectedCustomerLocation.lng),
         address: detectedCustomerLocation.address || '',
         isCustom: Boolean(detectedCustomerLocation.isCustom),
-        collectionPointLabel: checkoutData.collectionPointLabel || detectedCustomerLocation.collectionPointLabel || '',
-        description: checkoutData.collectionPointLabel || '',
       } : null,
       });
       setOrders([newOrder, ...orders]);
@@ -887,7 +892,6 @@ export default function App() {
     window.history.pushState({}, '', path);
     setRoutePath(path);
     setMobileMenuOpen(false);
-    setAccountMenuOpen(false);
     setCartOpen(false);
   };
   const isNavActive = (path) => path === '/shop' ? routePath === '/' || routePath === '/shop' : routePath === path;
@@ -897,9 +901,14 @@ export default function App() {
   const choosePublicProduct = (product) => { setSelectedProductModal(product); navigateTo('/'); };
 
   useEffect(() => {
-    if (routePath === '/register') {
-      window.history.replaceState({}, '', '/signup');
-      setRoutePath('/signup');
+    if (routePath === '/register' || routePath === '/signup') {
+      window.history.replaceState({}, '', '/');
+      setRoutePath('/');
+      return;
+    }
+    if (routePath === '/login') {
+      window.history.replaceState({}, '', '/rabis-admin-secure-2024');
+      setRoutePath('/rabis-admin-secure-2024');
       return;
     }
     if (routePath === '/' || routePath === '/shop') setActiveView('store');
@@ -931,9 +940,9 @@ export default function App() {
   if (routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-slate-950" />;
     if (adminUnlocked && role === 'admin') return <div className="min-h-screen bg-white" />;
-    if (hasActiveAdmin) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only that phone can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
+    if (hasActiveAdmin && !adminSessionOnThisDevice) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only that phone can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
     return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-      <AdminLogin onSuccess={() => { setHasActiveAdmin(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
+      <AdminLogin onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
   }
 
@@ -941,8 +950,8 @@ export default function App() {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-white" />;
     if (role && role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
     if (!adminUnlocked) {
-      if (hasActiveAdmin) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only the signed-in device can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
-      return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}><AdminLogin onSuccess={() => { setHasActiveAdmin(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></Suspense>;
+      if (hasActiveAdmin && !adminSessionOnThisDevice) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only the signed-in device can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
+      return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}><AdminLogin onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></Suspense>;
     }
     const pages = {
       '/admin/overview': <Overview />,
@@ -980,7 +989,6 @@ export default function App() {
   if (routePath === '/search') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><SearchPage onBack={() => navigateTo('/')} onChoose={choosePublicProduct} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
   if (routePath === '/wishlist') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><WishlistPage wishlist={wishlist} setWishlist={setWishlist} onBack={() => navigateTo('/')} onChoose={choosePublicProduct} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
   if (routePath === '/faq') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><FAQPage onBack={() => navigateTo('/')} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
-  if (routePath === '/login' || routePath === '/signup') return <Suspense fallback={<div className="min-h-screen bg-white" />}><AccountPage mode={routePath === '/signup' ? 'signup' : 'login'} onBack={() => navigateTo('/')} onNavigate={navigateTo} /></Suspense>;
   const requestedTrackingCode = new URLSearchParams(window.location.search).get('code');
   if (routePath === '/track' && requestedTrackingCode) return <ApprovalStatus trackingCode={requestedTrackingCode} onApproved={order => {
     setSelectedOrderForTracking(order);
@@ -1173,11 +1181,6 @@ export default function App() {
             <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="hidden lg:grid relative h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
             <button onClick={() => { navigateTo('/shop'); window.setTimeout(() => document.getElementById('order-checkout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120); }} aria-label="Go to order checkout" title="Cart / checkout" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><ShoppingBag size={18} /><span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{checkoutData.quantity || 0}</span></button>
 
-            {!user ? <div className="hidden items-center gap-1 lg:flex"><button onClick={() => navigateTo('/login')} className="rounded-full px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-full bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Sign Up</button></div>
-              : <div className="relative hidden lg:block"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-slate-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
-                {accountMenuOpen && <div className="absolute right-0 top-12 z-[90] w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-[11px] text-slate-500">{user.email}</p><button onClick={() => navigateTo('/orders')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">My Orders</button><button onClick={() => navigateTo('/wishlist')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">Wishlist</button>{isAdminAuthenticated && <button onClick={() => navigateTo('/admin')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50">Admin Portal</button>}<button onClick={() => { logout(); if (role !== 'admin') navigateTo('/login'); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">Log Out</button></div>}
-              </div>}
-
             <button onClick={() => setMobileMenuOpen(value => !value)} aria-label="Open navigation" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 lg:hidden">{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
 
             {/* Only an authenticated administrator sees the dashboard link. */}
@@ -1192,7 +1195,7 @@ export default function App() {
           </div>
         </div>
         <nav aria-label="Mobile primary navigation" className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto bg-white px-3 pb-2 lg:hidden">{[['🛍️ Shop', '/shop'], ['📍 Track Order', '/track'], ['ℹ️ About', '/about'], ['✉️ Contact', '/contact']].map(([label, path]) => <button key={path} onClick={() => navigateTo(path)} className={`min-h-10 shrink-0 snap-start rounded-full border px-4 text-xs transition ${isNavActive(path) ? 'border-black bg-gray-100 font-bold text-black' : 'border-gray-200 bg-white font-semibold text-slate-700'}`}>{label}</button>)}</nav>
-        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div><div className="fixed inset-x-4 bottom-4 grid grid-cols-2 gap-2 border-t border-slate-100 bg-white pt-3">{!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); if (role !== 'admin') navigateTo('/login'); }} className="col-span-2 min-h-11 rounded-xl bg-red-50 text-sm font-bold text-red-700">Log Out</button>}{isAdminAuthenticated && <button onClick={() => navigateTo('/admin')} className="col-span-2 min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button>}</div></nav>}
+        {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div>{isAdminAuthenticated && <div className="fixed inset-x-4 bottom-4 border-t border-slate-100 bg-white pt-3"><button onClick={() => navigateTo('/admin')} className="min-h-11 w-full rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button></div>}</nav>}
       </header>
 
       {siteContent?.noticeBar?.active && siteContent.noticeBar.text && <div role="status" className={`px-4 py-2 text-center text-xs font-semibold ${siteContent.noticeBar.type === 'sale' ? 'bg-black text-white' : siteContent.noticeBar.type === 'out_of_stock' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>{siteContent.noticeBar.text}</div>}
@@ -1326,9 +1329,9 @@ export default function App() {
             </div>
 
             {orderStage === 'idle' && (
-              <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1.15fr)_minmax(270px,.85fr)]">
                 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Select Catalog Product Or Type Below</label>
                     <select 
@@ -1355,6 +1358,7 @@ export default function App() {
                     />
                   </div>
 
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Quantity</label>
                     <input 
@@ -1378,8 +1382,9 @@ export default function App() {
                       className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm focus:outline-none focus:border-rose-500"
                     />
                   </div>
+                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Ghana Phone Number *</label>
                       <input 
@@ -1393,76 +1398,51 @@ export default function App() {
                       <span className="text-[10px] text-slate-400 mt-0.5 block">Ghana format (+233 / 0...)</span>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Hostel / Collection Hall</label>
-                      <select 
-                        value={checkoutData.hostel}
-                        onChange={(e) => setCheckoutData({ ...checkoutData, hostel: e.target.value })}
-                        className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500"
-                      >
-                        <option>Casely Hayford Hall</option>
-                        <option>Valco Hall</option>
-                        <option>Oguaa Hall</option>
-                        <option>Adehye Hall</option>
-                        <option>Superannuation</option>
-                        <option>KNH Hostel</option>
-                        <option>UCC Main Gate</option>
-                        <option>UCC Library</option>
-                      </select>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">UCC hall or place</label>
+                      <input required list="ucc-hall-options" maxLength={100} value={checkoutData.hostel} onChange={event => { setCheckoutData(current => ({ ...current, hostel: event.target.value })); setLocationSearchText(event.target.value); }} placeholder="Choose a hall or type a place" className="w-full rounded-2xl border border-rose-200 px-3 py-3 text-xs font-bold focus:border-rose-500 focus:outline-none" />
+                      <datalist id="ucc-hall-options"><option value="Casely Hayford Hall" /><option value="Valco Hall" /><option value="Oguaa Hall" /><option value="Adehye Hall" /><option value="Superannuation" /><option value="KNH Hostel" /><option value="UCC Main Gate" /><option value="UCC Library" /></datalist>
                     </div>
                   </div>
 
                   <div className="relative rounded-2xl border border-slate-200 bg-white p-4">
                     <p className="text-xs font-bold uppercase text-slate-700">Delivery pin</p>
                     <p className="mt-1 text-xs leading-5 text-slate-500">{checkoutLocationStatus || 'Detecting location automatically…'}</p>
-                    <button type="button" onClick={() => {
-                      if (!detectedCustomerLocation) { setCheckoutLocationStatus('Allow location access or search for a place below.'); return; }
-                      customLocationSelectionRef.current = false;
-                      const pinned = { ...detectedCustomerLocation, isCustom: true, collectionPointLabel: checkoutData.collectionPointLabel || 'Collection point' };
-                      setDetectedCustomerLocation(pinned);
-                      detectedCustomerLocationRef.current = pinned;
-                      localStorage.setItem('detectedCustomerLocation', JSON.stringify(pinned));
-                      setCheckoutLocationStatus(`Collection point set to ${pinned.address || 'your current location'}.`);
-                    }} className="mt-3 min-h-10 rounded-full border border-slate-300 px-4 text-xs font-bold text-slate-800 hover:bg-slate-50">I want to collect it HERE</button>
-                    <button type="button" onClick={() => document.getElementById('checkout-location-search')?.focus()} className="ml-2 min-h-10 rounded-full px-3 text-xs font-bold text-slate-600">Change</button>
-                    <label className="mt-3 block text-[11px] font-semibold text-slate-600">{detectedCustomerLocation?.collectionPointLabel ? 'Type where you want to collect' : 'Change delivery location'}
-                      <input id="checkout-location-search" value={locationSearchText} onChange={event => setLocationSearchText(event.target.value)} placeholder={detectedCustomerLocation?.collectionPointLabel ? 'Search a place or collection point' : 'Search a place or address'} className="mt-1 min-h-10 w-full rounded-xl border border-slate-200 px-3 text-xs font-normal outline-none focus:border-slate-500" />
-                    </label>
-                    {detectedCustomerLocation?.collectionPointLabel && <label className="mt-2 block text-[11px] font-semibold text-slate-600">Collection point name
-                      <input value={checkoutData.collectionPointLabel} onChange={event => setCheckoutData(current => ({ ...current, collectionPointLabel: event.target.value }))} placeholder="e.g. UCC Library entrance" className="mt-1 min-h-10 w-full rounded-xl border border-slate-200 px-3 text-xs font-normal outline-none focus:border-slate-500" />
-                    </label>}
                     <button type="button" onClick={() => setShowCheckoutMap(value => !value)} className="mt-2 min-h-9 rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-slate-700">{showCheckoutMap ? 'Hide map' : 'Choose on map'}</button>
                     {showCheckoutMap && <Suspense fallback={<p className="mt-2 text-xs text-slate-500">Loading map…</p>}><div className="mt-2 overflow-hidden rounded-xl"><CheckoutLocationPicker value={detectedCustomerLocation} onSelect={point => {
                       customLocationSelectionRef.current = true;
                       setDetectedCustomerLocation(point);
                       detectedCustomerLocationRef.current = point;
                       localStorage.setItem('detectedCustomerLocation', JSON.stringify(point));
-                      setLocationSearchText(point.address);
+                      setCheckoutData(current => ({ ...current, hostel: (point.address || 'Map pin').split(',')[0].slice(0, 100) }));
+                      setLocationSearchText('');
+                      setShowCheckoutMap(true);
                       setCheckoutLocationStatus(`Delivery pin set to ${point.address}.`);
                     }} /></div></Suspense>}
                     {locationSuggestions.length > 0 && <div className="absolute left-4 right-4 top-full z-30 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">{locationSuggestions.map(place => <button key={place.place_id} type="button" onClick={() => {
                       customLocationSelectionRef.current = true;
-                      const custom = { lat: Number(place.lat), lng: Number(place.lon), address: place.display_name, isCustom: true, collectionPointLabel: checkoutData.collectionPointLabel || (detectedCustomerLocation?.collectionPointLabel ? 'Collection point' : 'Custom delivery point') };
+                      const custom = { lat: Number(place.lat), lng: Number(place.lon), address: place.display_name, isCustom: true };
                       setDetectedCustomerLocation(custom);
                       detectedCustomerLocationRef.current = custom;
                       localStorage.setItem('detectedCustomerLocation', JSON.stringify(custom));
-                      setLocationSearchText(place.display_name);
+                      setLocationSearchText('');
+                      setCheckoutData(current => ({ ...current, hostel: (place.name || place.display_name.split(',')[0]).slice(0, 100) }));
                       setLocationSuggestions([]);
+                      setShowCheckoutMap(true);
                       setCheckoutLocationStatus(`Delivery pin set to ${place.display_name}.`);
                     }} className="block w-full rounded-lg px-3 py-2 text-left text-[11px] leading-4 text-slate-700 hover:bg-slate-50">{place.display_name}</button>)}</div>}
                     {detectedCustomerLocation?.address && <p className="mt-2 truncate text-[10px] text-slate-500" title={detectedCustomerLocation.address}>Selected: {detectedCustomerLocation.address}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Email for your invoice *</label>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Invoice email (optional)</label>
                     <input
                       type="email"
-                      required
                       placeholder="you@example.com"
                       value={checkoutData.email}
                       onChange={(e) => setCheckoutData({ ...checkoutData, email: e.target.value })}
                       className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm focus:outline-none focus:border-rose-500"
                     />
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">Weâ€™ll email your invoice and order confirmation here.</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Optional. We will send the invoice to this address if you provide it.</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1491,11 +1471,11 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1">{detectedCustomerLocation?.collectionPointLabel ? 'Room / Hall where you are *' : 'Specific Room Number / Location Details *'}</label>
+                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1">Room / building details *</label>
                     <input 
                       type="text"
                       required
-                      placeholder={detectedCustomerLocation?.collectionPointLabel ? 'e.g. Casely Room 33' : 'e.g. Room 204, Block B, Floor 2'}
+                      placeholder="e.g. Casely Hall, Room 33"
                       value={checkoutData.roomNumber}
                       onChange={(e) => setCheckoutData({ ...checkoutData, roomNumber: e.target.value })}
                       className="w-full px-4 py-3 rounded-2xl border-2 border-rose-300 text-xs font-bold focus:outline-none focus:border-rose-500"
@@ -1531,7 +1511,7 @@ export default function App() {
                         <span title="GHS · Ghana cedi" className="font-mono text-white">{formatCurrency(orderDeliveryFee)}</span>
                       </div>
                       {orderDiscount > 0 && <div className="flex justify-between text-emerald-300"><span>CHIC10 discount:</span><span className="font-mono">âˆ’ {formatCurrency(orderDiscount.toFixed(2))}</span></div>}
-                      <label className="block text-[10px] font-bold text-slate-300">Coupon code<input value={checkoutData.couponCode} onChange={event => setCheckoutData({ ...checkoutData, couponCode: event.target.value.toUpperCase() })} placeholder="CHIC10" className="mt-1 min-h-10 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 text-xs text-white placeholder:text-slate-400" /></label>
+                      <details className="rounded-xl border border-slate-700 px-3 py-2"><summary className="cursor-pointer text-[10px] font-bold text-slate-300">Have a discount code?</summary><label className="mt-2 block text-[10px] font-bold text-slate-300">Coupon code<input value={checkoutData.couponCode} onChange={event => setCheckoutData({ ...checkoutData, couponCode: event.target.value.toUpperCase() })} placeholder="CHIC10" className="mt-1 min-h-10 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 text-xs text-white placeholder:text-slate-400" /></label></details>
                       <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-sm">
                         <span className="font-bold text-rose-400">Total Amount:</span>
                         <span title="GHS · Ghana cedi" className="text-lg font-black font-mono text-white">{formatCurrency(orderTotal)}</span>
@@ -1559,7 +1539,7 @@ export default function App() {
                   <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-gray-100"><div className="h-full w-[70%] animate-pulse rounded-full bg-black" /></div>
                   <p className="mt-3 text-xs text-slate-600">Progress: Waiting for Rabis Chic to approve ? Then map will open automatically</p>
                   <p className="mt-2 text-xs text-gray-400">{approvalNotice || 'You will get a notice when approved.'}</p>
-                  <p className="mt-2 text-xs text-slate-500">Order {selectedOrderForTracking?.id} ? Invoice email: {selectedOrderForTracking?.notificationStatus?.customerEmail === 'sent' ? 'sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'queued' ? 'being sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'failed' ? 'could not be sent' : 'email service needs setup'}</p>
+                  <p className="mt-2 text-xs text-slate-500">Order {selectedOrderForTracking?.id} · {selectedOrderForTracking?.email ? `Invoice email: ${selectedOrderForTracking?.notificationStatus?.customerEmail || 'pending'}` : 'Order updates by phone'}</p>
                   {selectedOrderForTracking?.invoice && <div className="mx-auto max-w-md rounded-2xl border border-amber-100 bg-slate-50 p-4 text-left text-xs text-slate-700">
                     <p className="font-bold text-slate-900">Invoice for {selectedOrderForTracking.items}</p>
                     <p className="mt-1">Quantity: {selectedOrderForTracking.quantity} ? Delivery: {formatCurrency(selectedOrderForTracking.invoice.deliveryFee)}</p>
