@@ -200,11 +200,12 @@ export default function App() {
   });
   const [siteContent, setSiteContent] = useState(null);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [heroPaused, setHeroPaused] = useState(false);
   useEffect(() => {
-    if (slides.length < 2) return undefined;
+    if (slides.length < 2 || heroPaused) return undefined;
     const timer = window.setInterval(() => setCurrentSlideIndex(index => (index + 1) % slides.length), 4000);
     return () => window.clearInterval(timer);
-  }, [slides.length]);
+  }, [slides.length, heroPaused]);
 
   // Orders & Messages State
   const [orders, setOrders] = useState(() => {
@@ -1108,25 +1109,19 @@ export default function App() {
         <main className="max-w-7xl mx-auto px-4 py-6 space-y-8 md:space-y-10">
 
           {/* HERO BANNER SLIDESHOW */}
-          <div className="relative w-full h-64 sm:h-80 md:h-96 rounded-3xl overflow-hidden shadow-xl bg-slate-900" onTouchStart={event => { event.currentTarget.dataset.touchX = String(event.touches[0].clientX); }} onTouchEnd={event => { const start = Number(event.currentTarget.dataset.touchX); const dx = event.changedTouches[0].clientX - start; if (Math.abs(dx) > 45 && slides.length > 1) setCurrentSlideIndex(index => (index + (dx < 0 ? 1 : slides.length - 1)) % slides.length); }}>
+          <div className="relative w-full h-64 sm:h-80 md:h-96 rounded-3xl overflow-hidden shadow-xl bg-slate-900" onMouseEnter={() => setHeroPaused(true)} onMouseLeave={() => setHeroPaused(false)} onTouchStart={event => { event.currentTarget.dataset.touchX = String(event.touches[0].clientX); }} onTouchEnd={event => { const start = Number(event.currentTarget.dataset.touchX); const dx = event.changedTouches[0].clientX - start; if (Math.abs(dx) > 45 && slides.length > 1) setCurrentSlideIndex(index => (index + (dx < 0 ? 1 : slides.length - 1)) % slides.length); }}>
             {slides.length > 0 && (
-              <>
-                <img 
-                  src={slides[currentSlideIndex]?.url} 
-                  className="w-full h-full object-cover transition-all duration-700 opacity-90"
-                  alt="Banner" 
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex flex-col justify-end p-5 md:p-8 text-white">
-                  <span className="bg-rose-500 text-white text-[9px] md:text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider w-max mb-2">
-                    {slides[currentSlideIndex]?.badge && slides[currentSlideIndex].badge !== 'None' ? slides[currentSlideIndex].badge : 'UCC Campus Exclusive'}
-                  </span>
-                  <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight">{slides[currentSlideIndex]?.title || publicHero.title}</h2>
-                  <p className="text-xs md:text-sm text-rose-100 mt-1">{slides[currentSlideIndex]?.subtitle || publicHero.subtitle || 'Fast UCC hostel delivery with live GPS tracking.'}</p>
-                  <a href={slides[currentSlideIndex]?.buttonLink || publicHero.ctaLink || '#store'} className="mt-4 inline-flex w-max items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-slate-800">
-                    {slides[currentSlideIndex]?.buttonText || publicHero.ctaText || 'Shop Now'}
-                  </a>
-                </div>
-              </>
+              <div className="absolute inset-0 flex transition-transform duration-500 ease-in-out" style={{ width: `${slides.length * 100}%`, transform: `translateX(-${currentSlideIndex * (100 / slides.length)}%)` }}>
+                {slides.map((slide, index) => <article key={slide.id || index} className="relative h-full shrink-0" style={{ width: `${100 / slides.length}%` }}>
+                  <img src={slide.url} className="absolute inset-0 h-full w-full object-cover opacity-90" alt={slide.title || 'Rabis Chic collection'} />
+                  <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-slate-950/80 via-transparent to-transparent p-5 text-white md:p-8">
+                    <span className="mb-2 w-max rounded-full bg-rose-500 px-3 py-1 text-[9px] font-extrabold uppercase tracking-wider text-white md:text-[10px]">{slide.badge && slide.badge !== 'None' ? slide.badge : 'UCC Campus Exclusive'}</span>
+                    <h2 className="text-2xl font-serif font-bold leading-tight sm:text-3xl md:text-4xl">{slide.title || publicHero.title}</h2>
+                    <p className="mt-1 text-xs text-rose-100 md:text-sm">{slide.subtitle || publicHero.subtitle || 'Fast UCC hostel delivery with live GPS tracking.'}</p>
+                    <a href={slide.buttonLink || publicHero.ctaLink || '#store'} className="mt-4 inline-flex w-max items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-slate-800">{slide.buttonText || publicHero.ctaText || 'Shop Now'}</a>
+                  </div>
+                </article>)}
+              </div>
             )}
             <button 
               onClick={() => setCurrentSlideIndex((currentSlideIndex - 1 + slides.length) % slides.length)}
@@ -1343,10 +1338,16 @@ export default function App() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Payment</label>
-                      <select value={checkoutData.paymentMethod} onChange={(e) => setCheckoutData({ ...checkoutData, paymentMethod: e.target.value, ...(e.target.value === 'Cash on Delivery' ? { deliveryOption: 'ucc' } : {}) })} className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold">
-                        <option value="MTN MoMo">MoMo (MTN / Telecel)</option>
-                        <option value="Cash on Delivery">Cash on Delivery (UCC campus)</option>
-                      </select>
+                      <div className="grid gap-2">
+                        <label className={`flex min-h-12 items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-bold transition ${checkoutData.paymentMethod === 'MTN MoMo' ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-rose-200 bg-white text-slate-700'}`}>
+                          <input type="radio" name="paymentMethod" value="MTN MoMo" checked={checkoutData.paymentMethod === 'MTN MoMo'} onChange={event => setCheckoutData({ ...checkoutData, paymentMethod: event.target.value })} className="h-4 w-4 accent-amber-500" />
+                          <span className="flex-1">MoMo (MTN / Telecel)</span><span className="text-[10px] font-medium">Pay on MoMo</span>
+                        </label>
+                        <label className={`flex min-h-12 items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-bold transition ${checkoutData.paymentMethod === 'Cash on Delivery' ? 'border-emerald-300 bg-emerald-50 text-emerald-950' : 'border-rose-200 bg-white text-slate-700'}`}>
+                          <input type="radio" name="paymentMethod" value="Cash on Delivery" checked={checkoutData.paymentMethod === 'Cash on Delivery'} onChange={event => setCheckoutData({ ...checkoutData, paymentMethod: event.target.value, deliveryOption: 'ucc' })} className="h-4 w-4 accent-emerald-600" />
+                          <span className="flex-1">Cash on Delivery</span><span className="text-[10px] font-medium">UCC campus only</span>
+                        </label>
+                      </div>
                       {checkoutData.paymentMethod === 'Cash on Delivery' ? <p className="mt-2 rounded-xl bg-emerald-50 p-3 text-[11px] leading-5 text-emerald-800">Pay the rider when your order arrives on UCC campus.</p> : <div className="mt-2 rounded-xl bg-amber-50 p-3 text-[11px] leading-5 text-amber-900"><p>Pay to MoMo number <b>055 123 4567</b><br/>Account name: <b>Rabis Chic</b></p><a href={adminWhatsAppMessageHref} target="_blank" rel="noreferrer" className="mt-1 inline-flex font-bold underline">Send payment confirmation on WhatsApp</a></div>}
                     </div>
                   </div>

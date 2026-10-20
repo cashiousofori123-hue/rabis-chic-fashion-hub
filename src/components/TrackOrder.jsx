@@ -16,7 +16,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-const SHOP_POINT = [5.1036, -1.2825];
+const SHOP_POINT = [5.1144, -1.2933];
 const DEFAULT_DESTINATION = [5.115, -1.288];
 const MAP_TILES = {
   street: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -442,6 +442,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
             <button type="button" onClick={() => setStopOpen(value => !value)} className="flex items-center justify-center gap-1.5 rounded-full bg-[#e8f0fe] px-4 py-3 text-xs font-bold text-[#1967d2]"><Plus size={16} /> Add stops</button>
             <button type="button" onClick={() => setSaved(value => !value)} className={`flex items-center justify-center gap-1.5 rounded-full px-4 py-3 text-xs font-bold ${saved ? 'bg-emerald-100 text-emerald-800' : 'bg-[#e8f0fe] text-[#1967d2]'}`}>{saved ? <Check size={16} /> : <Bookmark size={16} />} {saved ? 'Saved' : 'Save'}</button>
           </div>
+          <a href={`https://www.google.com/maps/dir/?api=1&destination=${destinationPoint[0]},${destinationPoint[1]}`} target="_blank" rel="noreferrer" className="mt-2 flex min-h-11 items-center justify-center rounded-xl border border-slate-200 text-xs font-bold text-[#1a73e8]">Open in Google Maps</a>
           {stopOpen && <div className="mt-3 flex gap-2"><input value={stopText} onChange={event => setStopText(event.target.value)} placeholder="Add a stop along the way" className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500" /><button type="button" onClick={() => { setDestinationError(stopText ? `Stop noted: ${stopText}` : 'Enter a stop first.'); setStopOpen(false); }} className="rounded-xl bg-blue-600 px-4 text-sm font-bold text-white">Add</button></div>}
 
           {(destinationError || gpsError) && <p role="status" className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-xs text-blue-800">{destinationError || gpsError}</p>}

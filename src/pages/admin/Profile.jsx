@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../api';
 import AdminPageShell from './AdminPageShell';
 import { useAuth } from '../../context/AuthContext';
@@ -8,6 +8,7 @@ export default function Profile() {
   const [profile,  setProfile]  = useState({ name: '', title: '', bio: '', avatar: '' });
   const [saving,   setSaving]   = useState(false);
   const [message,  setMessage]  = useState('');
+  const imageInputRef = useRef(null);
 
   useEffect(() => {
     api.get('/store-profile').then(({ data }) => setProfile(data)).catch(() => {});
@@ -65,12 +66,16 @@ export default function Profile() {
             className="h-24 w-24 rounded-full border-4 border-rose-100 object-cover" />
         )}
         <div className="space-y-2">
-          <label htmlFor="admin-profile-image"
-            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-50">
-            <i className="fa-solid fa-image" /> Select profile photo
-          </label>
-          <input id="admin-profile-image" type="file" accept="image/*"
-            onChange={handleImageChange} className="sr-only" />
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => { imageInputRef.current?.removeAttribute('capture'); imageInputRef.current?.click(); }}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-50">
+              <i className="fa-solid fa-image" /> Select profile photo
+            </button>
+            <button type="button" onClick={() => { imageInputRef.current?.setAttribute('capture', 'environment'); imageInputRef.current?.click(); }}
+              className="min-h-11 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-50">Take photo</button>
+          </div>
+          <input ref={imageInputRef} type="file" accept="image/*"
+            onChange={event => { handleImageChange(event); event.currentTarget.removeAttribute('capture'); }} className="sr-only" />
           <p className="text-[11px] text-slate-500">Image is resized before upload.</p>
         </div>
       </div>
