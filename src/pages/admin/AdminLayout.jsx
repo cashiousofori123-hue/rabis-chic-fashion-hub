@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -23,8 +24,32 @@ const GROUPS = [
 
 export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
   const { user } = useAuth();
+  const [alertsEnabled, setAlertsEnabled] = useState(() => localStorage.getItem('rabi_order_alerts_enabled') === 'true');
   const email = user?.email || localStorage.getItem('rabi_user_email') || 'Admin account';
   const avatar = adminProfile?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(adminProfile?.name || email)}&background=e11d48&color=fff`;
+
+  const enableOrderAlerts = async () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    localStorage.setItem('rabi_order_alerts_enabled', 'true');
+    setAlertsEnabled(true);
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        const audio = new AudioContextClass();
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.frequency.value = 880;
+        gain.gain.value = 0.08;
+        oscillator.connect(gain);
+        gain.connect(audio.destination);
+        oscillator.start();
+        oscillator.stop(audio.currentTime + 0.12);
+        window.setTimeout(() => audio.close().catch(() => {}), 300);
+      }
+    } catch { /* Sound can be unavailable on muted devices. */ }
+  };
 
   return (
     <div className="min-h-screen bg-[#f0f2f5] px-4 py-6 text-slate-800">
@@ -59,6 +84,11 @@ export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
           <span className="flex-1">Visit the Site</span>
           <ArrowRight className="text-slate-400" size={18} />
         </a>
+
+        <button type="button" onClick={enableOrderAlerts} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 p-4 text-sm font-bold text-white shadow-sm hover:bg-emerald-800">
+          <span aria-hidden="true">{alertsEnabled ? '🔔' : '♬'}</span>
+          {alertsEnabled ? 'Order alerts enabled' : 'Enable order sound & notifications'}
+        </button>
 
         <button type="button" onClick={onLogout} className="flex w-full items-center justify-center gap-2 rounded-xl bg-white p-4 text-sm font-bold text-red-600 shadow-sm hover:bg-red-50">
           <LogOut size={17} /> Log Out

@@ -5,14 +5,20 @@ import json
 import math
 import os
 import secrets
+import smtplib
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+from html import escape
 from pathlib import Path
 from threading import RLock
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -181,6 +187,7 @@ class PriceUpdate(BaseModel):
 
 class OrderRequest(BaseModel):
     customer: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=5, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     phone: str = Field(min_length=8, max_length=20)
     hostel: str = Field(min_length=1, max_length=100)
     room: str = Field(min_length=1, max_length=100)
@@ -189,6 +196,100 @@ class OrderRequest(BaseModel):
     quantity: int = Field(ge=1, le=10)
     deliveryOption: str = Field(pattern="^(standard|express|outside)$")
     paymentMethod: str = Field(default="MTN MoMo", max_length=30)
+
+
+def _send_order_email(order: dict[str, Any], recipient: str, *, admin_notice: bool = False) -> bool:
+    host = os.getenv("SMTP_HOST", "").strip()
+    username = os.getenv("SMTP_USER", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "")
+    sender = os.getenv("SMTP_FROM", username).strip()
+    if not all((host, username, password, sender, recipient)):
+        return False
+
+    safe = {key: escape(str(order.get(key, ""))) for key in ("id", "customer", "email", "phone", "items", "quantity", "hostel", "room", "paymentMethod")}
+    invoice = order.get("invoice", {})
+    subject = f"New Rabi's Chic order {safe['id']}" if admin_notice else f"Your Rabi's Chic invoice {safe['id']}"
+    greeting = "A new customer order has arrived." if admin_notice else "Thank you for your order. Here is the invoice preview you approved at checkout."
+    html = f"""<h2>Rabi's Chic Fashion Hub</h2><p>{greeting}</p>
+      <p><b>Order:</b> {safe['id']}<br><b>Customer:</b> {safe['customer']}<br>
+      <b>Phone:</b> {safe['phone']}<br><b>Email:</b> {safe['email']}<br>
+      <b>Delivery:</b> {safe['hostel']}, {safe['room']}<br><b>Payment:</b> {safe['paymentMethod']}</p>
+      <table cellpadding="6" cellspacing="0" border="1"><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Subtotal</th></tr>
+      <tr><td>{safe['items']}</td><td>{safe['quantity']}</td><td>GH₵ {invoice.get('unitPrice', 0):.2f}</td><td>GH₵ {invoice.get('subtotal', 0):.2f}</td></tr></table>
+      <p>Delivery: GH₵ {invoice.get('deliveryFee', 0):.2f}<br><b>Total: GH₵ {invoice.get('total', 0):.2f}</b></p>
+      <p>Status: Submitted - Pending Admin Approval</p>
+      {f'<p><a href="https://rabis-chic-fashion-hub.vercel.app/rabis-admin">Open the admin dashboard</a></p>' if admin_notice else ''}"""
+    plain = (f"{greeting}\nOrder {order['id']}\n{order['items']} x {order['quantity']}\n"
+             f"Subtotal: GH₵ {invoice.get('subtotal', 0):.2f}\nDelivery: GH₵ {invoice.get('deliveryFee', 0):.2f}\n"
+             f"Total: GH₵ {invoice.get('total', 0):.2f}\nStatus: Submitted - Pending Admin Approval")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(plain)
+    message.add_alternative(html, subtype="html")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    with smtplib.SMTP(host, port, timeout=12) as smtp:
+        smtp.starttls()
+        smtp.login(username, password)
+        smtp.send_message(message)
+    return True
+
+
+def _send_order_sms(order: dict[str, Any]) -> bool:
+    sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+    token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+    sender = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+    recipient = os.getenv("RABI_ADMIN_PHONE", "").strip()
+    if not all((sid, token, sender, recipient)):
+        return False
+    message = urllib.parse.urlencode({
+        "From": sender,
+        "To": recipient,
+        "Body": f"New Rabi's Chic order {order['id']}: {order['customer']}, {order['items']} x {order['quantity']}, GH₵ {order['amount']:.2f}. Check the admin dashboard.",
+    }).encode()
+    request = urllib.request.Request(
+        f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+        data=message,
+        headers={"Authorization": "Basic " + __import__("base64").b64encode(f"{sid}:{token}".encode()).decode()},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=12):
+        return True
+
+
+def _deliver_order_notifications(order_id: str, customer_email: str) -> None:
+    if storage.enabled():
+        order = storage.get_order(order_id)
+    else:
+        with DATA_LOCK:
+            order = ORDERS.get(order_id)
+    if not order:
+        return
+
+    status = {"adminEmail": "not_configured", "customerEmail": "not_configured", "sms": "not_configured"}
+    for key, recipient, is_admin in (
+        ("adminEmail", ADMIN_EMAIL, True),
+        ("customerEmail", customer_email, False),
+    ):
+        if not recipient:
+            continue
+        try:
+            status[key] = "sent" if _send_order_email(order, recipient, admin_notice=is_admin) else "not_configured"
+        except (OSError, smtplib.SMTPException, ValueError):
+            status[key] = "failed"
+    try:
+        status["sms"] = "sent" if _send_order_sms(order) else "not_configured"
+    except (OSError, urllib.error.URLError, ValueError):
+        status["sms"] = "failed"
+
+    order["notificationStatus"] = status
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        with DATA_LOCK:
+            ORDERS[order_id] = order
+            write_data("orders.json", ORDERS)
 
 
 class LocationUpdate(BaseModel):
@@ -763,22 +864,32 @@ def transfer_admin(
 
 
 @app.post("/orders")
-def create_order(request: OrderRequest) -> dict[str, Any]:
+def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     product = storage.get_product(request.productId) if storage.enabled() else next((entry for entry in PRODUCTS if entry["id"] == request.productId), None)
     if product is None:
         raise HTTPException(status_code=422, detail="Choose an available catalog item")
     delivery_fees = {"standard": 30, "express": 60, "outside": 80}
-    total = float(product["price"]) * request.quantity + delivery_fees[request.deliveryOption]
+    unit_price = round(float(product["price"]) * (100 - float(product.get("discount", 0))) / 100, 2)
+    subtotal = round(unit_price * request.quantity, 2)
+    delivery_fee = delivery_fees[request.deliveryOption]
+    total = round(subtotal + delivery_fee, 2)
     order_id = f"RABI-{secrets.token_hex(16).upper()}"
     order = {
         **request.model_dump(),
         "amount": total,
+        "invoice": {
+            "unitPrice": unit_price,
+            "subtotal": subtotal,
+            "deliveryFee": delivery_fee,
+            "total": total,
+        },
         "id": order_id,
         "status": "Submitted - Pending Admin Approval",
         "progress": 0,
         "eta": "Awaiting Approval",
         "riderUserId": None,
         "createdAt": datetime.now(timezone.utc).isoformat(),
+        "notificationStatus": {"adminEmail": "queued", "customerEmail": "queued", "sms": "queued"},
     }
     with DATA_LOCK:
         if storage.enabled():
@@ -786,6 +897,7 @@ def create_order(request: OrderRequest) -> dict[str, Any]:
         else:
             ORDERS[order_id] = order
             write_data("orders.json", ORDERS)
+    background_tasks.add_task(_deliver_order_notifications, order_id, request.email.strip().lower())
     return order
 
 

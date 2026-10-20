@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Fingerprint, LogOut, ShieldCheck } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
@@ -187,6 +187,8 @@ export default function App() {
   const [orders, setOrders] = useState(() => {
     return [];
   });
+  const [adminOrderAlert, setAdminOrderAlert] = useState(null);
+  const seenOrderIds = useRef(null);
 
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState(null);
   const [messages, setMessages] = useState(() => {
@@ -206,6 +208,7 @@ export default function App() {
   const [checkoutData, setCheckoutData] = useState({
     name: '',
     phone: '',
+    email: '',
     hostel: 'Casely Hayford Hall',
     roomNumber: '',
     selectedProductId: 1,
@@ -306,11 +309,59 @@ export default function App() {
 
   useEffect(() => {
     if (!isAdminAuthenticated && role !== 'rider') return;
-    api.get('/orders').then(({ data }) => setOrders(data)).catch(() => setOrders([]));
+    let active = true;
+    const refreshOrders = async () => {
+      try {
+        const { data } = await api.get('/orders');
+        if (!active) return;
+        setOrders(data);
+        const latestIds = new Set(data.map(order => order.id));
+        if (seenOrderIds.current === null) {
+          seenOrderIds.current = latestIds;
+          return;
+        }
+        const newOrders = data.filter(order => !seenOrderIds.current.has(order.id));
+        latestIds.forEach(id => seenOrderIds.current.add(id));
+        if (newOrders.length) {
+          const newest = newOrders[0];
+          setAdminOrderAlert(newest);
+          if (localStorage.getItem('rabi_order_alerts_enabled') === 'true') {
+            try {
+              const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+              if (AudioContextClass) {
+                const audio = new AudioContextClass();
+                const oscillator = audio.createOscillator();
+                const gain = audio.createGain();
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(880, audio.currentTime);
+                oscillator.frequency.setValueAtTime(1175, audio.currentTime + 0.16);
+                gain.gain.setValueAtTime(0.001, audio.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.16, audio.currentTime + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.42);
+                oscillator.connect(gain);
+                gain.connect(audio.destination);
+                oscillator.start();
+                oscillator.stop(audio.currentTime + 0.43);
+                window.setTimeout(() => audio.close().catch(() => {}), 600);
+              }
+            } catch { /* Browser sound may be muted or unavailable. */ }
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('New Rabi’s Chic order', {
+                body: `${newest.customer} ordered ${newest.items}. Total GH₵ ${newest.amount}.`,
+                tag: newest.id,
+              });
+            }
+          }
+        }
+      } catch { /* Keep the last known orders during temporary network failures. */ }
+    };
+    refreshOrders();
+    const timer = window.setInterval(refreshOrders, 8000);
     if (isAdminAuthenticated) {
       api.get('/users/pending').then(({ data }) => setPendingUsers(data)).catch(() => setPendingUsers([]));
       api.get('/users/riders').then(({ data }) => setRiders(data)).catch(() => setRiders([]));
     }
+    return () => { active = false; window.clearInterval(timer); };
   }, [isAdminAuthenticated, role]);
 
   useEffect(() => {
@@ -386,6 +437,7 @@ export default function App() {
       const { data: newOrder } = await api.post('/orders', {
       customer: checkoutData.name,
       phone: checkoutData.phone,
+      email: checkoutData.email,
       hostel: checkoutData.hostel,
       room: checkoutData.roomNumber,
       items: itemName,
@@ -668,16 +720,30 @@ export default function App() {
       '/admin/profile': <ProfilePage />,
       '/admin/settings': <SettingsPage adminContact={adminContact} setAdminContact={setAdminContact} transferEmail={transferEmail} setTransferEmail={setTransferEmail} />,
     };
-    return <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
-      {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
-        onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
-        onLogout={() => { logout(); window.history.replaceState({}, '', '/'); setRoutePath('/'); }} />
-        : pages[routePath] || pages['/admin/overview']}
-    </Suspense>;
+    return <>
+      {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
+        <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} · {adminOrderAlert.items} · GH₵ {adminOrderAlert.amount}</p>
+            <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
+          <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">×</button></div>
+      </div>}
+      <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
+        {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
+          onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
+          onLogout={() => { logout(); window.history.replaceState({}, '', '/'); setRoutePath('/'); }} />
+          : pages[routePath] || pages['/admin/overview']}
+      </Suspense>
+    </>;
   }
 
   return (
     <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
+      {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
+        <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><i className="fa-solid fa-bell" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-900">New order received</p><p className="mt-1 text-xs text-slate-600">{adminOrderAlert.customer} · {adminOrderAlert.items} · GH₵ {adminOrderAlert.amount}</p>
+            <button onClick={() => { setAdminOrderAlert(null); window.history.pushState({}, '', '/admin/orders'); setRoutePath('/admin/orders'); }} className="mt-2 text-xs font-bold text-rose-700">View in Orders</button></div>
+          <button aria-label="Dismiss order notification" onClick={() => setAdminOrderAlert(null)} className="text-slate-400">×</button></div>
+      </div>}
 
       {/* PRODUCT DETAILS MODAL */}
       {selectedProductModal && (
@@ -1093,6 +1159,19 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Email for your invoice *</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="you@example.com"
+                      value={checkoutData.email}
+                      onChange={(e) => setCheckoutData({ ...checkoutData, email: e.target.value })}
+                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm focus:outline-none focus:border-rose-500"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">We’ll email your invoice and order confirmation here.</span>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Delivery option</label>
@@ -1176,6 +1255,13 @@ export default function App() {
                 <div>
                   <h4 className="font-serif font-bold text-lg text-emerald-900">Order Submitted Successfully!</h4>
                   <p className="text-xs text-emerald-700 mt-1">Your order has been sent to Rabi's admin dashboard. Once approved, the live Google Maps map will track your delivery.</p>
+                  <p className="text-xs text-emerald-700 mt-1">Order {selectedOrderForTracking?.id} · Invoice email: {selectedOrderForTracking?.notificationStatus?.customerEmail === 'sent' ? 'sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'queued' ? 'being sent' : selectedOrderForTracking?.notificationStatus?.customerEmail === 'failed' ? 'could not be sent' : 'email service needs setup'}</p>
+                  {selectedOrderForTracking?.invoice && <div className="mx-auto max-w-md rounded-2xl border border-emerald-200 bg-white p-4 text-left text-xs text-slate-700">
+                    <p className="font-bold text-slate-900">Invoice for {selectedOrderForTracking.items}</p>
+                    <p className="mt-1">Quantity: {selectedOrderForTracking.quantity} · Delivery: GH₵ {selectedOrderForTracking.invoice.deliveryFee}</p>
+                    <p className="mt-1 font-black text-emerald-800">Total: GH₵ {selectedOrderForTracking.invoice.total}</p>
+                    <p className="mt-1 text-slate-500">A copy will be sent to {selectedOrderForTracking.email} by email.</p>
+                  </div>}
                 </div>
                 <div className="flex flex-wrap justify-center gap-3 pt-2">
                   <button 

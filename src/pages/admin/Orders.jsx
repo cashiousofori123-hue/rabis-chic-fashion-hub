@@ -12,7 +12,12 @@ export default function Orders() {
     api.get('/users/riders').then(({ data }) => setRiders(data)).catch(() => {});
   };
 
-  useEffect(reload, []);
+  useEffect(() => {
+    reload();
+    const refreshOrders = () => api.get('/orders').then(({ data }) => setOrders(data)).catch(() => {});
+    const timer = window.setInterval(refreshOrders, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const approveOrder = async (id) => {
     try {
@@ -56,6 +61,7 @@ export default function Orders() {
                 <span className="text-xs font-bold text-slate-900">{order.customer}</span>
                 <span className="text-xs text-slate-400">({order.phone})</span>
               </div>
+              {order.email && <p className="text-[11px] text-slate-500">Invoice: {order.email} {order.notificationStatus?.customerEmail === 'sent' ? '· emailed' : ''}</p>}
               <p className="text-xs text-slate-700 font-medium">
                 📦 <strong>{order.items}</strong> (Qty: {order.quantity}) — Total: <strong className="text-rose-600">GH₵ {order.amount}</strong>
               </p>
