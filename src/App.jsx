@@ -261,6 +261,11 @@ export default function App() {
     api.get('/store-profile')
       .then(({ data }) => setAdminProfile(data))
       .catch(() => {});
+    const refreshProfile = () => api.get('/store-profile')
+      .then(({ data }) => setAdminProfile(data))
+      .catch(() => {});
+    window.addEventListener('rabis:profile-updated', refreshProfile);
+    return () => window.removeEventListener('rabis:profile-updated', refreshProfile);
   }, []);
 
   useEffect(() => {
@@ -811,21 +816,16 @@ export default function App() {
               <i className="fa-solid fa-address-book"></i> Contact
             </button>
 
-            {/* Admin entry is only visible to authenticated admins */}
-            {isAdminAuthenticated && (
+            {/* Only an authenticated administrator sees the dashboard link. */}
+            {isAdminAccount && (
               <button
                 onClick={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }}
-                className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'admin' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                className="px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
-                <i className="fa-solid fa-user-shield"></i> Admin Portal
+                <i className="fa-solid fa-user-shield"></i> Visit Admin Dashboard
               </button>
             )}
-            {isAdminAccount && !adminUnlocked && (
-              <button onClick={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }} className="flex items-center gap-1 whitespace-nowrap rounded-xl bg-slate-900 px-2.5 py-2 text-xs font-bold text-white">
-                <Fingerprint size={15} /> Unlock Admin
-              </button>
-            )}
-            {user && (
+            {user && role !== 'admin' && (
               <button onClick={() => { logout(); setActiveView('store'); }} className="px-2.5 py-2 text-xs font-bold text-slate-600 flex items-center gap-1" title="Log out">
                 <LogOut size={15} /> Logout
               </button>
