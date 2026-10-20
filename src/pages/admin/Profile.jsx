@@ -1,34 +1,40 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../../api';
 import AdminPageShell from './AdminPageShell';
 import { useAuth } from '../../context/AuthContext';
+import ImagePickerNative from '../../components/ImagePickerNative';
+import { uploadContentImage } from '../../utils/uploadContentImage';
 
 export default function Profile() {
   const { user } = useAuth();
   const [profile,  setProfile]  = useState({ name: '', title: '', bio: '', avatar: '' });
   const [saving,   setSaving]   = useState(false);
   const [message,  setMessage]  = useState('');
-  const imageInputRef = useRef(null);
 
   useEffect(() => {
     api.get('/store-profile').then(({ data }) => setProfile(data)).catch(() => {});
   }, []);
 
-  const handleImageChange = async (e) => {
-    const file = e.target.files?.[0];
+  const handleImageChange = async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
-    const bitmap = await createImageBitmap(file);
-    const scale  = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement('canvas');
-    canvas.width  = Math.round(bitmap.width  * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    let img = canvas.toDataURL('image/webp', 0.78);
-    if (img.length > 900_000) img = canvas.toDataURL('image/jpeg', 0.62);
-    setProfile(p => ({ ...p, avatar: img }));
-    setMessage('Photo selected. Save to publish.');
-    e.target.value = '';
+    try {
+      if (!window.createImageBitmap) throw new Error('This browser cannot resize the photo. Choose a smaller image.');
+      const bitmap = await createImageBitmap(file);
+      const scale  = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width  = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      let imageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.78));
+      if (!imageBlob || imageBlob.size > 650_000) imageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.62));
+      if (!imageBlob || imageBlob.size > 700_000) throw new Error('Could not compress this photo enough. Choose a smaller image.');
+      const imageUrl = await uploadContentImage(new File([imageBlob], `profile.${imageBlob.type === 'image/webp' ? 'webp' : 'jpg'}`, { type: imageBlob.type }));
+      setProfile(p => ({ ...p, avatar: imageUrl }));
+      setMessage('Photo uploaded. Save to publish.');
+    } catch (error) {
+      setMessage(error.response?.data?.detail || error.message || 'Could not upload that photo.');
+    }
   };
 
   const handleSave = async (e) => {
@@ -66,16 +72,7 @@ export default function Profile() {
             className="h-24 w-24 rounded-full border-4 border-rose-100 object-cover" />
         )}
         <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => { imageInputRef.current?.removeAttribute('capture'); imageInputRef.current?.click(); }}
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-50">
-              <i className="fa-solid fa-image" /> Select profile photo
-            </button>
-            <button type="button" onClick={() => { imageInputRef.current?.setAttribute('capture', 'environment'); imageInputRef.current?.click(); }}
-              className="min-h-11 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-50">Take photo</button>
-          </div>
-          <input ref={imageInputRef} type="file" accept="image/*"
-            onChange={event => { handleImageChange(event); event.currentTarget.removeAttribute('capture'); }} className="sr-only" />
+          <ImagePickerNative onSelect={files => handleImageChange(files[0])} disabled={saving} />
           <p className="text-[11px] text-slate-500">Image is resized before upload.</p>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 import AdminPageShell from './AdminPageShell';
 
-export default function Settings({ adminContact, setAdminContact, transferEmail, setTransferEmail }) {
+export default function Settings({ adminContact, setAdminContact }) {
   const { logout, user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState('');
@@ -33,14 +33,6 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleTransfer = async (e) => {
-    e.preventDefault();
-    try {
-      await api.post('/users/transfer-admin', { new_admin_email: transferEmail });
-      logout();
-    } catch (err) { alert(err.response?.data?.detail || 'Could not transfer admin.'); }
   };
 
   return (
@@ -93,21 +85,9 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
         </button>
       </form>
 
-      {/* Admin transfer */}
-      <div className="bg-amber-50 p-6 md:p-8 rounded-2xl border border-amber-200 space-y-4">
-        <div>
-          <h3 className="font-serif font-bold text-xl text-slate-900">Client Handover</h3>
-          <p className="mt-1 text-xs text-slate-600">Transfer the store owner role to the client. Your account will be downgraded and you will be signed out.</p>
-        </div>
-        <form onSubmit={handleTransfer} className="flex flex-col sm:flex-row gap-3">
-          <input type="email" required placeholder="Client account email"
-            value={transferEmail} onChange={e => setTransferEmail(e.target.value)}
-            className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm" />
-          <button type="submit"
-            className="rounded-xl bg-amber-700 px-5 py-3 text-xs font-bold text-white">
-            Transfer admin &amp; logout
-          </button>
-        </form>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8">
+        <h3 className="font-serif text-xl font-bold text-slate-900">Client Handover</h3>
+        <p className="mt-2 text-xs leading-5 text-slate-600">Use “Logout / hand over device” above when you are ready. The two-step confirmation closes this single-device session and makes Admin Sign In visible in the footer for the next authorized admin.</p>
       </div>
     </div>
     </AdminPageShell>

@@ -61,7 +61,7 @@ const INITIAL_PRODUCTS = [
   {
     id: 4,
     name: "Strappy Stiletto Party Heels",
-    category: "Footwear",
+    category: "Shoes",
     price: 210,
     stock: 10,
     rating: 4.6,
@@ -74,7 +74,7 @@ const ALL_CATEGORIES = [
   "All",
   "Dresses",
   "Bags",
-  "Footwear",
+  "Shoes",
   "Lip balm",
   "Face mask",
   "Eye mask",
@@ -125,7 +125,7 @@ export default function App() {
     let active = true;
     const refresh = () => api.get('/admin/status').then(({ data }) => { if (active) setHasActiveAdmin(Boolean(data.hasActiveAdmin)); }).catch(() => { if (active) setHasActiveAdmin(true); });
     refresh();
-    const timer = window.setInterval(refresh, 12000);
+    const timer = window.setInterval(refresh, 5000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
@@ -161,7 +161,7 @@ export default function App() {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState(() => new URLSearchParams(window.location.search).get('category') || 'All');
   const [selectedProductModal, setSelectedProductModal] = useState(null);
   const [showSizeGuide, setShowSizeGuide] = useState(false);
   const [newsletterEmail, setNewsletterEmail] = useState('');
@@ -220,6 +220,9 @@ export default function App() {
     const timer = window.setInterval(() => setCurrentSlideIndex(index => (index + 1) % slides.length), 4000);
     return () => window.clearInterval(timer);
   }, [slides.length, heroPaused]);
+  useEffect(() => {
+    setCurrentSlideIndex(index => slides.length ? index % slides.length : 0);
+  }, [slides.length]);
 
   // Orders & Messages State
   const [orders, setOrders] = useState(() => {
@@ -251,6 +254,7 @@ export default function App() {
     email: '',
     hostel: 'Casely Hayford Hall',
     roomNumber: '',
+    collectionPointLabel: '',
     selectedProductId: 1,
     customItemName: '',
     quantity: 1,
@@ -613,7 +617,8 @@ export default function App() {
         lng: Number(detectedCustomerLocation.lng),
         address: detectedCustomerLocation.address || '',
         isCustom: Boolean(detectedCustomerLocation.isCustom),
-        collectionPointLabel: detectedCustomerLocation.collectionPointLabel || '',
+        collectionPointLabel: checkoutData.collectionPointLabel || detectedCustomerLocation.collectionPointLabel || '',
+        description: checkoutData.collectionPointLabel || '',
       } : null,
       });
       setOrders([newOrder, ...orders]);
@@ -885,6 +890,7 @@ export default function App() {
     setAccountMenuOpen(false);
     setCartOpen(false);
   };
+  const isNavActive = (path) => path === '/shop' ? routePath === '/' || routePath === '/shop' : routePath === path;
   const toggleWishlist = (productId) => setWishlist(current => current.some(id => String(id) === String(productId))
     ? current.filter(id => String(id) !== String(productId))
     : [...current, productId]);
@@ -904,11 +910,23 @@ export default function App() {
   }, [routePath, Boolean(activeTrackingOrder)]);
 
   useEffect(() => {
+    const category = new URLSearchParams(window.location.search).get('category');
+    if (category) setSelectedCategory(category.charAt(0).toUpperCase() + category.slice(1));
+  }, [routePath]);
+
+  useEffect(() => {
     if ((routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') && authReady && adminSessionReady && adminUnlocked && role === 'admin') {
       window.history.replaceState({}, '', '/admin');
       setRoutePath('/admin');
     }
   }, [routePath, authReady, adminSessionReady, adminUnlocked, role]);
+
+  useEffect(() => {
+    if (routePath.startsWith('/admin') && authReady && adminSessionReady && hasActiveAdmin === false && !adminUnlocked) {
+      window.history.replaceState({}, '', '/rabis-admin-secure-2024');
+      setRoutePath('/rabis-admin-secure-2024');
+    }
+  }, [routePath, authReady, adminSessionReady, hasActiveAdmin, adminUnlocked]);
 
   if (routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-slate-950" />;
@@ -1091,8 +1109,8 @@ export default function App() {
       )}
 
       {/* NAVIGATION BAR */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-rose-100 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-3 lg:px-6 py-2 flex flex-wrap lg:flex-nowrap items-center justify-between gap-2 lg:gap-3 min-h-14">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center justify-between gap-2 px-3 py-2 lg:h-16 lg:flex-nowrap lg:gap-3 lg:px-6 lg:py-0">
           <div className="flex shrink-0 items-center gap-2 cursor-pointer" onClick={() => setActiveView('store')}>
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-600 text-white flex items-center justify-center font-serif font-bold text-xl shadow-md">
               R
@@ -1103,8 +1121,8 @@ export default function App() {
             </div>
           </div>
 
-          <nav aria-label="Primary navigation" className="hidden lg:flex min-w-0 flex-1 items-center justify-center gap-4 xl:gap-6 mx-2">
-            {[['🛍️ Shop', '/shop'], ['📍 Track Order', '/track'], ['ℹ️ About', '/about'], ['✉️ Contact', '/contact']].map(([label, path]) => <button key={path} onClick={() => navigateTo(path)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-slate-700 hover:text-slate-950">{label}</button>)}
+          <nav aria-label="Primary navigation" className="mx-2 hidden min-w-0 flex-1 items-center justify-center gap-3 lg:flex xl:gap-5">
+            {[['🛍️ Shop', '/shop'], ['📍 Track Order', '/track'], ['ℹ️ About', '/about'], ['✉️ Contact', '/contact']].map(([label, path]) => <button key={path} onClick={() => navigateTo(path)} className={`flex h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-[13px] transition ${isNavActive(path) ? 'border-black bg-gray-100 font-bold text-black' : 'border-gray-200 bg-white font-medium text-slate-700 hover:border-gray-400 hover:bg-gray-100'}`}>{label}</button>)}
           </nav>
 
           {/* SEARCH BAR */}
@@ -1122,7 +1140,7 @@ export default function App() {
                 aria-label="Search products"
                 aria-expanded={searchFocused && Boolean(searchQuery.trim())}
                 aria-controls="product-search-results"
-                className="w-full pl-9 pr-8 py-2 rounded-2xl bg-rose-50/60 border border-rose-200 text-xs text-slate-800 focus:outline-none focus:border-rose-500 focus:bg-white transition font-medium"
+                className="w-full rounded-2xl border border-gray-200 bg-white py-2 pl-9 pr-8 text-xs font-medium text-slate-800 transition focus:border-black focus:outline-none"
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600">
@@ -1173,7 +1191,7 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto px-3 pb-2 lg:hidden"><button onClick={() => navigateTo('/shop')} className="min-h-10 shrink-0 snap-start rounded-full bg-slate-950 px-4 text-xs font-bold text-white">🛍️ Shop</button><button onClick={() => navigateTo('/track')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">📍 Track Order</button><button onClick={() => navigateTo('/about')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">ℹ️ About</button><button onClick={() => navigateTo('/contact')} className="min-h-10 shrink-0 snap-start rounded-full border border-slate-200 bg-white px-4 text-xs font-bold">✉️ Contact</button></div>
+        <nav aria-label="Mobile primary navigation" className="mx-auto flex max-w-7xl snap-x gap-2 overflow-x-auto bg-white px-3 pb-2 lg:hidden">{[['🛍️ Shop', '/shop'], ['📍 Track Order', '/track'], ['ℹ️ About', '/about'], ['✉️ Contact', '/contact']].map(([label, path]) => <button key={path} onClick={() => navigateTo(path)} className={`min-h-10 shrink-0 snap-start rounded-full border px-4 text-xs transition ${isNavActive(path) ? 'border-black bg-gray-100 font-bold text-black' : 'border-gray-200 bg-white font-semibold text-slate-700'}`}>{label}</button>)}</nav>
         {mobileMenuOpen && <nav className="fixed right-0 top-0 z-[100] h-dvh w-[80vw] max-w-80 overflow-y-auto border-l border-slate-200 bg-white px-4 py-4 pb-24 shadow-2xl lg:hidden"><div className="mb-5 flex items-center justify-between"><span className="font-bold">Menu</span><button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button></div><p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">Shop</p><div className="grid grid-cols-1 gap-1">{[['Home','/'],['Shop','/shop'],['Track Order','/track'],['Search','/search']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}<p className="mb-1 mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-400">Help</p>{[['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => { setMobileMenuOpen(false); navigateTo(path); }} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}</div><div className="fixed inset-x-4 bottom-4 grid grid-cols-2 gap-2 border-t border-slate-100 bg-white pt-3">{!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); if (role !== 'admin') navigateTo('/login'); }} className="col-span-2 min-h-11 rounded-xl bg-red-50 text-sm font-bold text-red-700">Log Out</button>}{isAdminAuthenticated && <button onClick={() => navigateTo('/admin')} className="col-span-2 min-h-11 rounded-xl bg-slate-950 text-sm font-bold text-white">Admin Portal</button>}</div></nav>}
       </header>
 
@@ -1198,20 +1216,22 @@ export default function App() {
                 </article>)}
               </div>
             )}
-            <button 
+            {slides.length > 1 && <button aria-label="Previous slide"
               onClick={() => setCurrentSlideIndex((currentSlideIndex - 1 + slides.length) % slides.length)}
-              className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center transition"
+              className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-slate-900 transition hover:bg-white"
             >
-              <i className="fa-solid fa-chevron-left text-xs md:text-base"></i>
-            </button>
-            <button 
+              <i className="fa-solid fa-chevron-left text-sm"></i>
+            </button>}
+            {slides.length > 1 && <button aria-label="Next slide"
               onClick={() => setCurrentSlideIndex((currentSlideIndex + 1) % slides.length)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center transition"
+              className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-slate-900 transition hover:bg-white"
             >
-              <i className="fa-solid fa-chevron-right text-xs md:text-base"></i>
-            </button>
-            {slides.length > 1 && <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2">{slides.map((slide, index) => <button key={slide.id} type="button" aria-label={`Show slide ${index + 1}`} onClick={() => setCurrentSlideIndex(index)} className={`h-2 rounded-full transition-all ${index === currentSlideIndex ? 'w-6 bg-white' : 'w-2 bg-white/60'}`} />)}</div>}
+              <i className="fa-solid fa-chevron-right text-sm"></i>
+            </button>}
+            {slides.length > 1 && <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2">{slides.map((slide, index) => <button key={slide.id} type="button" aria-label={`Show slide ${index + 1}`} onClick={() => setCurrentSlideIndex(index)} className={`h-2 rounded-full shadow transition-all ${index === currentSlideIndex ? 'w-6 bg-black' : 'w-2 bg-white/80'}`} />)}</div>}
           </div>
+
+          {siteContent?.featured?.bannerImages?.length > 0 && <section aria-label="Featured collection photos" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{siteContent.featured.bannerImages.slice(0, 6).map((imageUrl, index) => <img key={`${index}-${imageUrl.slice(0, 32)}`} src={imageUrl} alt={`Featured collection ${index + 1}`} loading="lazy" className="aspect-[4/3] w-full rounded-2xl border border-slate-200 object-cover" />)}</section>}
 
           {/* CATEGORIES */}
           <div id="store" className="space-y-4">
@@ -1373,7 +1393,7 @@ export default function App() {
                       <span className="text-[10px] text-slate-400 mt-0.5 block">Ghana format (+233 / 0...)</span>
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Delivery Hostel</label>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Hostel / Collection Hall</label>
                       <select 
                         value={checkoutData.hostel}
                         onChange={(e) => setCheckoutData({ ...checkoutData, hostel: e.target.value })}
@@ -1385,6 +1405,8 @@ export default function App() {
                         <option>Adehye Hall</option>
                         <option>Superannuation</option>
                         <option>KNH Hostel</option>
+                        <option>UCC Main Gate</option>
+                        <option>UCC Library</option>
                       </select>
                     </div>
                   </div>
@@ -1395,15 +1417,19 @@ export default function App() {
                     <button type="button" onClick={() => {
                       if (!detectedCustomerLocation) { setCheckoutLocationStatus('Allow location access or search for a place below.'); return; }
                       customLocationSelectionRef.current = false;
-                      const pinned = { ...detectedCustomerLocation, isCustom: false, collectionPointLabel: 'Collection point' };
+                      const pinned = { ...detectedCustomerLocation, isCustom: true, collectionPointLabel: checkoutData.collectionPointLabel || 'Collection point' };
                       setDetectedCustomerLocation(pinned);
                       detectedCustomerLocationRef.current = pinned;
                       localStorage.setItem('detectedCustomerLocation', JSON.stringify(pinned));
                       setCheckoutLocationStatus(`Collection point set to ${pinned.address || 'your current location'}.`);
                     }} className="mt-3 min-h-10 rounded-full border border-slate-300 px-4 text-xs font-bold text-slate-800 hover:bg-slate-50">I want to collect it HERE</button>
-                    <label className="mt-3 block text-[11px] font-semibold text-slate-600">Change delivery location
-                      <input value={locationSearchText} onChange={event => setLocationSearchText(event.target.value)} placeholder="Search a place or address" className="mt-1 min-h-10 w-full rounded-xl border border-slate-200 px-3 text-xs font-normal outline-none focus:border-slate-500" />
+                    <button type="button" onClick={() => document.getElementById('checkout-location-search')?.focus()} className="ml-2 min-h-10 rounded-full px-3 text-xs font-bold text-slate-600">Change</button>
+                    <label className="mt-3 block text-[11px] font-semibold text-slate-600">{detectedCustomerLocation?.collectionPointLabel ? 'Type where you want to collect' : 'Change delivery location'}
+                      <input id="checkout-location-search" value={locationSearchText} onChange={event => setLocationSearchText(event.target.value)} placeholder={detectedCustomerLocation?.collectionPointLabel ? 'Search a place or collection point' : 'Search a place or address'} className="mt-1 min-h-10 w-full rounded-xl border border-slate-200 px-3 text-xs font-normal outline-none focus:border-slate-500" />
                     </label>
+                    {detectedCustomerLocation?.collectionPointLabel && <label className="mt-2 block text-[11px] font-semibold text-slate-600">Collection point name
+                      <input value={checkoutData.collectionPointLabel} onChange={event => setCheckoutData(current => ({ ...current, collectionPointLabel: event.target.value }))} placeholder="e.g. UCC Library entrance" className="mt-1 min-h-10 w-full rounded-xl border border-slate-200 px-3 text-xs font-normal outline-none focus:border-slate-500" />
+                    </label>}
                     <button type="button" onClick={() => setShowCheckoutMap(value => !value)} className="mt-2 min-h-9 rounded-full border border-slate-200 px-3 text-[11px] font-semibold text-slate-700">{showCheckoutMap ? 'Hide map' : 'Choose on map'}</button>
                     {showCheckoutMap && <Suspense fallback={<p className="mt-2 text-xs text-slate-500">Loading map…</p>}><div className="mt-2 overflow-hidden rounded-xl"><CheckoutLocationPicker value={detectedCustomerLocation} onSelect={point => {
                       customLocationSelectionRef.current = true;
@@ -1415,7 +1441,7 @@ export default function App() {
                     }} /></div></Suspense>}
                     {locationSuggestions.length > 0 && <div className="absolute left-4 right-4 top-full z-30 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">{locationSuggestions.map(place => <button key={place.place_id} type="button" onClick={() => {
                       customLocationSelectionRef.current = true;
-                      const custom = { lat: Number(place.lat), lng: Number(place.lon), address: place.display_name, isCustom: true, collectionPointLabel: 'Custom delivery point' };
+                      const custom = { lat: Number(place.lat), lng: Number(place.lon), address: place.display_name, isCustom: true, collectionPointLabel: checkoutData.collectionPointLabel || (detectedCustomerLocation?.collectionPointLabel ? 'Collection point' : 'Custom delivery point') };
                       setDetectedCustomerLocation(custom);
                       detectedCustomerLocationRef.current = custom;
                       localStorage.setItem('detectedCustomerLocation', JSON.stringify(custom));
@@ -1465,11 +1491,11 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1">Specific Room Number / Location Details *</label>
+                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1">{detectedCustomerLocation?.collectionPointLabel ? 'Room / Hall where you are *' : 'Specific Room Number / Location Details *'}</label>
                     <input 
                       type="text"
                       required
-                      placeholder="e.g. Room 204, Block B, Floor 2"
+                      placeholder={detectedCustomerLocation?.collectionPointLabel ? 'e.g. Casely Room 33' : 'e.g. Room 204, Block B, Floor 2'}
                       value={checkoutData.roomNumber}
                       onChange={(e) => setCheckoutData({ ...checkoutData, roomNumber: e.target.value })}
                       className="w-full px-4 py-3 rounded-2xl border-2 border-rose-300 text-xs font-bold focus:outline-none focus:border-rose-500"

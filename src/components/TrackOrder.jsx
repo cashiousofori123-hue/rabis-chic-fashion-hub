@@ -155,6 +155,8 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
   const pollRef = useRef(null);
   const riderWatchRef = useRef(null);
   const lastRouteRef = useRef({ key: '', time: 0, start: null });
+  const transportModeRef = useRef(transportMode);
+  transportModeRef.current = transportMode;
 
   const orderAddress = [order?.hostel, order?.room && `Room ${order.room}`, 'Cape Coast, Ghana'].filter(Boolean).join(', ') || 'Casely Hayford Hall (Casford)';
   const hasOrderDestination = order?.destinationLat != null && order?.destinationLng != null && Number.isFinite(Number(order.destinationLat)) && Number.isFinite(Number(order.destinationLng));
@@ -237,7 +239,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
       setConnectionMode('polling');
       cleanupConnection();
       refresh();
-      pollRef.current = window.setInterval(refresh, 3000);
+      pollRef.current = window.setInterval(refresh, 5000);
     };
     refresh();
     const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8000');
@@ -319,7 +321,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
     setGpsError('');
     watchRef.current = navigator.geolocation.watchPosition(async ({ coords }) => {
       try {
-        await api.post(`/orders/${encodeURIComponent(order.id)}/location`, { lat: coords.latitude, lng: coords.longitude, rider: 'Courier rider', phone: riderPhoneNumber });
+        await api.post(`/orders/${encodeURIComponent(order.id)}/location`, { lat: coords.latitude, lng: coords.longitude, rider: 'Courier rider', phone: riderPhoneNumber, travelMode: transportModeRef.current });
         setSharing(true);
       } catch (error) {
         setGpsError(error.response?.data?.detail || 'GPS updates require an admin account.');
@@ -370,7 +372,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
     finally { setReviewBusy(false); }
   };
 
-  const delivered = order?.status?.toLowerCase().includes('delivered') || location?.status === 'Delivered' || Number(location?.progress) >= 100;
+  const delivered = Boolean(order?.deliverySuccess) || order?.status?.toLowerCase().includes('delivered') || location?.status === 'Delivered';
   const progress = Math.min(100, Math.max(0, Number(location?.progress ?? order?.progress ?? 0)));
   const distanceMeters = location?.distanceMeters != null ? Number(location.distanceMeters) : riderPoint ? Math.round(distanceKm * 1000) : null;
   const isSamePlace = Boolean(location?.isSamePlaceReached || (!delivered && distanceMeters != null && distanceMeters <= 20));

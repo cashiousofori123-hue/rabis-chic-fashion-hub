@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
+import ImagePickerNative from '../../components/ImagePickerNative';
+import { uploadContentImage } from '../../utils/uploadContentImage';
 import AdminPageShell from './AdminPageShell';
 
 const DEFAULT_SLIDE = { title: 'New UCC Campus Arrival', subtitle: 'Fresh looks delivered around campus.', imageUrl: '', badge: 'New Arrival', buttonText: 'Shop Now', buttonLink: '/shop' };
@@ -44,26 +46,62 @@ export default function ContentManager() {
     if (!file.type.startsWith('image/') || file.size > 12000000) { setMsg('Choose a photo smaller than 12 MB.'); event.target.value = ''; return; }
     setBusyImage(index);
     try {
-      let imageUrl;
+      let uploadFile = file;
       if (window.createImageBitmap) {
         const bitmap = await createImageBitmap(file);
         const scale = Math.min(1, 1440 / Math.max(bitmap.width, bitmap.height));
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
         canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close?.();
-        imageUrl = canvas.toDataURL('image/jpeg', 0.78);
-      } else imageUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read photo.')); reader.readAsDataURL(file); });
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+        if (blob) uploadFile = new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'hero-photo'}.jpg`, { type: 'image/jpeg' });
+      }
+      if (uploadFile.size > 4 * 1024 * 1024) throw new Error('Choose a photo smaller than 4 MB after compression.');
+      const imageUrl = await uploadContentImage(uploadFile);
       updateSlide(index, { imageUrl });
       setMsg('Photo ready. Save to publish.');
     } catch (error) { setMsg(error.message); }
     finally { setBusyImage(-1); event.target.value = ''; event.target.removeAttribute('capture'); }
+  };
+
+  const pickFeaturedImages = async files => {
+    const currentImages = content.featured?.bannerImages || [];
+    const selectedFiles = Array.from(files || []).slice(0, Math.max(0, 6 - currentImages.length));
+    if (!selectedFiles.length) return;
+    setBusyImage(-2);
+    setMsg('');
+    try {
+      const imageUrls = [];
+      let totalBytes = 0;
+      for (const file of selectedFiles) {
+        let uploadFile = file;
+        if (window.createImageBitmap) {
+          const bitmap = await createImageBitmap(file);
+          const scale = Math.min(1, 1440 / Math.max(bitmap.width, bitmap.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+          canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+          canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close?.();
+          const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+          if (blob) uploadFile = new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'featured-photo'}.jpg`, { type: 'image/jpeg' });
+        }
+        totalBytes += uploadFile.size;
+        if (totalBytes > 2 * 1024 * 1024) throw new Error('Featured photos must total 2 MB or less after compression.');
+        imageUrls.push(await uploadContentImage(uploadFile));
+      }
+      setContent(current => ({ ...current, featured: { ...current.featured, bannerImages: [...(current.featured?.bannerImages || []), ...imageUrls] } }));
+      setMsg('Featured photos ready. Save to publish.');
+    } catch (error) {
+      setMsg(error.response?.data?.detail || error.message || 'Could not upload featured photos.');
+    } finally { setBusyImage(-1); }
   };
   const save = async event => {
     event.preventDefault(); setSaving(true); setMsg('');
     try {
       const slides = content.heroSlides.filter(slide => slide.title?.trim() && slide.imageUrl);
       if (!slides.length) throw new Error('Add a title and photo to at least one hero slide.');
-      const featured = { ...content.featured, productIds: (content.featured?.productIds || []).slice(0, 6), bannerImages: slides.map(slide => slide.imageUrl) };
+      const featured = { ...content.featured, productIds: (content.featured?.productIds || []).slice(0, 6), bannerImages: (content.featured?.bannerImages || []).slice(0, 6) };
       const payload = { ...content, heroSlides: slides, hero: { ...slides[0], ctaText: slides[0].buttonText, ctaLink: slides[0].buttonLink }, featured, products: products.map(product => ({ id: product.id, name: product.name, price: product.price, discount: product.discount || 0 })) };
       await api.put('/site-content/homepage', payload);
       localStorage.setItem('rabis_content_updated_at', String(Date.now()));
@@ -94,7 +132,7 @@ export default function ContentManager() {
         <p className="text-[11px] text-slate-500">Slides auto-advance every 4 seconds. Customers can use arrows, dots, and swipe on phones.</p>
       </fieldset>
       <fieldset className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6"><legend className="px-2 text-sm font-black">Notice Bar</legend><label className="flex min-h-11 items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={Boolean(content.noticeBar?.active)} onChange={event => setContent(current => ({ ...current, noticeBar: { ...current.noticeBar, active: event.target.checked } }))} /> Show notice at top of store</label><input value={content.noticeBar?.text || ''} onChange={event => setContent(current => ({ ...current, noticeBar: { ...current.noticeBar, text: event.target.value } }))} placeholder="e.g. New arrivals this week" className="min-h-12 w-full rounded-xl border border-slate-300 px-3 text-sm"/><select value={content.noticeBar?.type || 'info'} onChange={event => setContent(current => ({ ...current, noticeBar: { ...current.noticeBar, type: event.target.value } }))} className="min-h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm">{NOTICE_TYPES.map(type => <option key={type} value={type}>{type.replace('_', ' ')}</option>)}</select></fieldset>
-      <fieldset className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6"><legend className="px-2 text-sm font-black">Featured Products</legend><p className="text-xs text-slate-500">Choose up to six products. Update product photos from My Products.</p><div className="grid gap-2 sm:grid-cols-2">{products.map(product => <label key={product.id} className="flex min-h-16 items-center gap-3 rounded-xl border border-slate-200 p-2"><input type="checkbox" checked={selected.includes(product.id)} disabled={!selected.includes(product.id) && selected.length >= 6} onChange={() => toggleFeatured(product.id)} /><img src={product.mainImage} alt="" className="h-12 w-10 rounded-lg object-cover"/><span className="min-w-0 flex-1 truncate text-xs font-bold">{product.name}</span><span title="GHS · Ghana cedi" className="text-[10px] text-slate-500">{formatCurrency(product.price)}</span></label>)}</div></fieldset>
+      <fieldset className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6"><legend className="px-2 text-sm font-black">Featured Products</legend><p className="text-xs text-slate-500">Choose up to six products and add up to six featured photos.</p><div className="grid gap-2 sm:grid-cols-2">{products.map(product => <label key={product.id} className="flex min-h-16 items-center gap-3 rounded-xl border border-slate-200 p-2"><input type="checkbox" checked={selected.includes(product.id)} disabled={!selected.includes(product.id) && selected.length >= 6} onChange={() => toggleFeatured(product.id)} /><img src={product.mainImage} alt="" className="h-12 w-10 rounded-lg object-cover"/><span className="min-w-0 flex-1 truncate text-xs font-bold">{product.name}</span><span title="GHS · Ghana cedi" className="text-[10px] text-slate-500">{formatCurrency(product.price)}</span></label>)}</div><div className="space-y-3 border-t border-slate-100 pt-3"><p className="text-xs font-bold text-slate-700">Featured photos</p><ImagePickerNative multiple onSelect={pickFeaturedImages} disabled={busyImage === -2 || (content.featured?.bannerImages || []).length >= 6} compact />{busyImage === -2 && <p className="text-center text-xs text-slate-500">Uploading featured photos…</p>}<div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{(content.featured?.bannerImages || []).map((imageUrl, index) => <div key={`${index}-${imageUrl.slice(0, 32)}`} className="relative aspect-square overflow-hidden rounded-lg border border-slate-200"><img src={imageUrl} alt={`Featured photo ${index + 1}`} className="h-full w-full object-cover"/><button type="button" aria-label={`Remove featured photo ${index + 1}`} onClick={() => setContent(current => ({ ...current, featured: { ...current.featured, bannerImages: current.featured.bannerImages.filter((_, itemIndex) => itemIndex !== index) } }))} className="absolute right-1 top-1 grid h-8 w-8 place-items-center rounded-full bg-white text-sm font-bold shadow">×</button></div>)}</div></div></fieldset>
       <details className="rounded-2xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-bold">Edit product display names and prices</summary><div className="mt-3 space-y-2">{products.map((product, index) => <div key={product.id} className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2"><input aria-label={`Name for ${product.name}`} value={product.name} onChange={event => setProducts(list => list.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} className="min-w-0 rounded-lg border border-slate-300 px-2 py-2 text-xs"/><input aria-label={`Price for ${product.name}`} type="number" min="0.01" step="0.01" value={product.price} onChange={event => setProducts(list => list.map((item, i) => i === index ? { ...item, price: Number(event.target.value) } : item))} className="rounded-lg border border-slate-300 px-2 py-2 text-xs"/></div>)}</div></details>
       {msg && <p role="status" className={`rounded-xl p-3 text-sm font-semibold ${msg.startsWith('Updated') || msg.startsWith('Photo') ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>{msg}</p>}
       <button type="submit" disabled={saving} className="fixed inset-x-3 bottom-3 z-40 mx-auto min-h-12 max-w-4xl rounded-full bg-slate-950 px-6 text-sm font-bold text-white shadow-2xl disabled:opacity-60">{saving ? 'Saving...' : 'Save and Update Live Site'}</button>

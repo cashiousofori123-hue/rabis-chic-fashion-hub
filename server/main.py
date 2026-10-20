@@ -21,8 +21,9 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -106,7 +107,7 @@ DEFAULT_PRODUCTS = [
     {
         "id": 4,
         "name": "Strappy Stiletto Party Heels",
-        "category": "Footwear",
+        "category": "Shoes",
         "price": 210,
         "stock": 10,
         "rating": 4.6,
@@ -459,7 +460,7 @@ def _delivery_metrics(lat: float, lng: float, destination_lat: float, destinatio
     remaining_km = _distance_km(lat, lng, destination_lat, destination_lng)
     route_km = _distance_km(*SHOP_COORDS, destination_lat, destination_lng)
     arrived = remaining_km <= 0.02
-    progress = 99 if arrived else 0 if route_km <= 0.05 else int(max(0, min(99, (1 - remaining_km / route_km) * 100)))
+    progress = 100 if arrived else 0 if route_km <= 0.05 else int(max(0, min(99, (1 - remaining_km / route_km) * 100)))
     eta = "At destination" if arrived else f"{max(1, math.ceil(remaining_km / 20 * 60))} mins"
     return {"progress": progress, "eta": eta, "status": "At destination" if arrived else "On The Way", "distanceKm": round(remaining_km, 3), "distanceMeters": int(round(remaining_km * 1000)), "isSamePlaceReached": arrived}
 
@@ -468,6 +469,10 @@ def _order_delivery_metrics(lat: float, lng: float, order: dict[str, Any]) -> di
     destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
     destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
     metrics = _delivery_metrics(lat, lng, destination_lat, destination_lng)
+    initial_km = float(order.get("initialDistanceKm") or _distance_km(SHOP_COORDS[0], SHOP_COORDS[1], destination_lat, destination_lng))
+    if initial_km > 0:
+        remaining_km = float(metrics["distanceKm"])
+        metrics["progress"] = 100 if metrics["isSamePlaceReached"] else int(max(0, min(99, (1 - remaining_km / initial_km) * 100)))
     if not order.get("destinationShared"):
         metrics["progress"] = min(99, metrics["progress"])
         metrics["eta"] = "Approx. " + ("1 min" if metrics["eta"] == "Arriving now" else metrics["eta"])
@@ -519,6 +524,7 @@ class LocationUpdate(BaseModel):
     lng: float = Field(ge=-180, le=180)
     rider: str = Field(default="Courier rider", max_length=100)
     phone: str = Field(default="", max_length=20)
+    travelMode: str = Field(default="drive", pattern="^(walk|bike|motor|drive|van|crew)$")
 
 
 class CustomerDestinationUpdate(BaseModel):
@@ -606,6 +612,71 @@ DEFAULT_STORE_CONTACT = {
 
 def public_user(user: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in user.items() if key != "password"}
+
+
+def _is_allowed_image_reference(value: Any) -> bool:
+    if not isinstance(value, str) or not value or len(value) > 5_600_000:
+        return False
+    if value.startswith("https://"):
+        parsed = urlparse(value)
+        return bool(parsed.netloc) and not any(character.isspace() for character in value)
+    if value.startswith("http://"):
+        parsed = urlparse(value)
+        is_local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        is_content_image = bool(re.fullmatch(r"/(?:api/)?content/images/[a-f0-9]{32}", parsed.path))
+        return is_local and is_content_image and not any(character.isspace() for character in value)
+    try:
+        header, encoded = value.split(",", 1)
+        if header not in {"data:image/jpeg;base64", "data:image/png;base64", "data:image/webp;base64"}:
+            return False
+        return len(base64.b64decode(encoded, validate=True)) <= 4 * 1024 * 1024
+    except (ValueError, base64.binascii.Error):
+        return False
+
+
+def _is_configured_admin(user: dict[str, Any] | None) -> bool:
+    return bool(
+        user
+        and ADMIN_EMAIL
+        and user.get("role") == "admin"
+        and str(user.get("email", "")).strip().lower() == ADMIN_EMAIL
+    )
+
+
+def _ensure_configured_admin_user(email: str, password: str) -> dict[str, Any] | None:
+    """Provision only the configured admin identity from server-side credentials."""
+    if storage.enabled():
+        user = storage.get_user_by_email(email)
+        if user is None:
+            candidate = {
+                "id": str(uuid4()),
+                "email": email,
+                "name": "Store Administrator",
+                "password": PASSWORD_CONTEXT.hash(password),
+                "role": "admin",
+            }
+            created = storage.create_user(candidate, ADMIN_EMAIL)
+            user = storage.get_user_by_email(email) if created.get("error") == "exists" else created
+        if user and user.get("role") != "admin":
+            user = storage.set_user_role(user["id"], "admin")
+        return user
+
+    with DATA_LOCK:
+        user = next((entry for entry in USERS if str(entry.get("email", "")).lower() == email), None)
+        if user is None:
+            user = {
+                "id": str(uuid4()),
+                "email": email,
+                "name": "Store Administrator",
+                "password": PASSWORD_CONTEXT.hash(password),
+                "role": "admin",
+            }
+            USERS.append(user)
+        elif user.get("role") != "admin":
+            user["role"] = "admin"
+            user["password"] = PASSWORD_CONTEXT.hash(password)
+        write_data("users.json", USERS)
+        return user
 
 
 def _get_admin_session() -> dict[str, Any]:
@@ -745,7 +816,7 @@ def get_current_admin(
     token: str = Depends(OAUTH2_SCHEME),
     device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
 ) -> dict[str, Any]:
-    if user["role"] != "admin":
+    if not _is_configured_admin(user):
         raise HTTPException(status_code=403, detail="You need to be an admin or wait for admin's approval")
     _require_admin_device(token, device_fingerprint)
     return user
@@ -756,7 +827,7 @@ def get_current_admin_identity(
     token: str = Depends(OAUTH2_SCHEME),
     device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
 ) -> dict[str, Any]:
-    if user["role"] != "admin":
+    if not _is_configured_admin(user):
         raise HTTPException(status_code=403, detail="Administrator account required")
     _require_admin_device(token, device_fingerprint)
     return user
@@ -798,9 +869,9 @@ def get_current_operator(
     token: str = Depends(OAUTH2_SCHEME),
     device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
 ) -> dict[str, Any]:
-    if user["role"] not in {"admin", "rider"}:
+    if user["role"] != "rider" and not _is_configured_admin(user):
         raise HTTPException(status_code=403, detail="A courier account is required to share rider GPS")
-    if user["role"] == "admin":
+    if _is_configured_admin(user):
         _require_admin_device(token, device_fingerprint)
     return user
 
@@ -862,10 +933,16 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
     email = payload.email.strip().lower()
     if not ADMIN_EMAIL or not secrets.compare_digest(email, ADMIN_EMAIL):
         raise HTTPException(status_code=403, detail="Only the configured admin can sign in. Access denied.")
-    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
     configured_password = os.getenv("ADMIN_PASSWORD", "")
-    password_matches = secrets.compare_digest(payload.password, configured_password) if configured_password else bool(user and PASSWORD_CONTEXT.verify(payload.password, user.get("password", "")))
-    if user is None or user.get("role") != "admin" or not password_matches:
+    if not configured_password:
+        raise HTTPException(status_code=503, detail="Admin sign-in is not configured. Set ADMIN_PASSWORD in the server environment.")
+    password_matches = secrets.compare_digest(payload.password, configured_password)
+    if not password_matches:
+        raise HTTPException(status_code=401, detail="Invalid admin email or password")
+    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
+    if not _is_configured_admin(user):
+        user = _ensure_configured_admin_user(email, configured_password)
+    if not _is_configured_admin(user):
         raise HTTPException(status_code=401, detail="Invalid admin email or password")
 
     now = datetime.now(timezone.utc)
@@ -921,7 +998,7 @@ def admin_session_check(
     token: str = Depends(OAUTH2_SCHEME),
     device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
 ) -> dict[str, bool]:
-    if user.get("role") != "admin":
+    if not _is_configured_admin(user):
         return {"valid": False, "isOwnDevice": False}
     try:
         session = _require_admin_device(token, device_fingerprint)
@@ -937,7 +1014,9 @@ def admin_logout_confirm(payload: AdminLogoutConfirmRequest, request: Request) -
         raise HTTPException(status_code=401, detail="Wrong password. Admin logout was not confirmed.")
     user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
     configured_password = os.getenv("ADMIN_PASSWORD", "")
-    password_matches = secrets.compare_digest(payload.password, configured_password) if configured_password else bool(user and PASSWORD_CONTEXT.verify(payload.password, user.get("password", "")))
+    if not configured_password:
+        raise HTTPException(status_code=503, detail="Admin sign-in is not configured. Set ADMIN_PASSWORD in the server environment.")
+    password_matches = secrets.compare_digest(payload.password, configured_password)
     if user is None or not password_matches:
         raise HTTPException(status_code=401, detail="Wrong password. Admin logout was not confirmed.")
     now = datetime.now(timezone.utc)
@@ -993,7 +1072,8 @@ def unlock_admin_with_password(
     payload: AdminPasswordUnlock,
     admin: dict[str, Any] = Depends(get_current_admin_identity),
 ) -> dict[str, str]:
-    if not PASSWORD_CONTEXT.verify(payload.password, admin["password"]):
+    configured_password = os.getenv("ADMIN_PASSWORD", "")
+    if not configured_password or not secrets.compare_digest(payload.password, configured_password):
         raise HTTPException(status_code=401, detail="Password did not match")
     session = _get_admin_session()
     return {"admin_access_token": create_access_token(admin["email"], admin_unlocked=True, admin_session_id=session.get("sessionId"), device_fingerprint=session.get("deviceFingerprint"))}
@@ -1012,10 +1092,8 @@ def update_store_profile(
     _: dict[str, Any] = Depends(get_current_admin),
 ) -> dict[str, Any]:
     avatar = profile.avatar.strip()
-    if not (avatar.startswith("https://") or avatar.startswith("data:image/")):
-        raise HTTPException(status_code=422, detail="Choose a secure image URL or upload an image")
-    if avatar.startswith("data:image/") and not avatar.startswith(("data:image/webp;base64,", "data:image/jpeg;base64,", "data:image/png;base64,")):
-        raise HTTPException(status_code=422, detail="Uploaded profile images must be WebP, JPEG, or PNG")
+    if not _is_allowed_image_reference(avatar):
+        raise HTTPException(status_code=422, detail="Choose a secure HTTPS image URL or upload a supported image")
     updated = {"name": profile.name.strip(), "title": profile.title.strip(), "bio": profile.bio.strip(), "avatar": avatar}
     if storage.enabled():
         storage.set_store_setting("profile", updated)
@@ -1183,7 +1261,7 @@ def finish_admin_passkey_login(
     if not passkey:
         raise HTTPException(status_code=401, detail="This passkey is not registered for an administrator")
     admin = storage.get_user_by_id(passkey["userId"]) if storage.enabled() else next((item for item in USERS if item["id"] == passkey["userId"]), None)
-    if not admin or admin.get("role") != "admin":
+    if not _is_configured_admin(admin):
         raise HTTPException(status_code=401, detail="This passkey is not registered for an administrator")
     try:
         verification = verify_authentication_response(
@@ -1298,6 +1376,8 @@ async def _read_product_input(request: Request, current: dict[str, Any] | None =
                 raise ValueError("Expected a list of image URLs")
         except (ValueError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=422, detail="Invalid image list") from exc
+    if any(not _is_allowed_image_reference(url) for url in existing_images):
+        raise HTTPException(status_code=422, detail="Product photos must be secure HTTPS URLs or uploaded image files")
     if current and current.get("isDefault") and current.get("mainImage") and current["mainImage"] not in existing_images:
         existing_images = [current["mainImage"], *existing_images]
 
@@ -1324,6 +1404,56 @@ async def _read_product_input(request: Request, current: dict[str, Any] | None =
         "rating": (current or {}).get("rating", 5.0),
     })
     return payload
+
+
+@app.post("/content/upload")
+async def upload_content_image(
+    request: Request,
+    file: UploadFile = File(...),
+    _: dict[str, Any] = Depends(get_current_admin),
+) -> dict[str, Any]:
+    allowed_signatures = {
+        "image/jpeg": lambda raw: raw.startswith(b"\xff\xd8\xff"),
+        "image/png": lambda raw: raw.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/webp": lambda raw: len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP",
+    }
+    content_type = (file.content_type or "").lower()
+    signature_check = allowed_signatures.get(content_type)
+    if signature_check is None:
+        raise HTTPException(status_code=415, detail="Upload a JPEG, PNG or WebP photo")
+    raw = await file.read(4 * 1024 * 1024 + 1)
+    if len(raw) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Photo must be 4 MB or smaller")
+    if not signature_check(raw):
+        raise HTTPException(status_code=415, detail="The uploaded file is not a valid image")
+    image_id = uuid4().hex
+    image = {"contentType": content_type, "data": base64.b64encode(raw).decode("ascii")}
+    setting_key = f"content_image:{image_id}"
+    if storage.enabled():
+        storage.set_store_setting(setting_key, image)
+    else:
+        with DATA_LOCK:
+            images = read_data("content_images.json", {})
+            images[image_id] = image
+            write_data("content_images.json", images)
+    api_prefix = "/api" if os.getenv("VERCEL") else ""
+    image_url = f"{str(request.base_url).rstrip('/')}{api_prefix}/content/images/{image_id}"
+    return {"imageUrl": image_url, "contentType": content_type, "size": len(raw)}
+
+
+@app.get("/content/images/{image_id}")
+def get_content_image(image_id: str) -> Response:
+    if not re.fullmatch(r"[a-f0-9]{32}", image_id):
+        raise HTTPException(status_code=404, detail="Image not found")
+    setting_key = f"content_image:{image_id}"
+    image = storage.get_store_setting(setting_key) if storage.enabled() else read_data("content_images.json", {}).get(image_id)
+    if not isinstance(image, dict) or image.get("contentType") not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(status_code=404, detail="Image not found")
+    try:
+        raw = base64.b64decode(image["data"], validate=True)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return Response(content=raw, media_type=image["contentType"], headers={"Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 @app.post("/products")
@@ -1440,26 +1570,7 @@ def transfer_admin(
     request: TransferRequest,
     admin: dict[str, Any] = Depends(get_current_admin),
 ) -> dict[str, str]:
-    email = request.new_admin_email.strip().lower()
-    if storage.enabled():
-        result = storage.transfer_admin(admin["id"], email)
-        if result == "missing":
-            raise HTTPException(status_code=404, detail="Client must sign up before admin transfer")
-        if result == "self":
-            raise HTTPException(status_code=400, detail="Choose another account for admin transfer")
-        if result == "missing_current":
-            raise HTTPException(status_code=401, detail="Current admin account no longer exists")
-        return {"message": f"Admin transferred to {email}. Please log in again."}
-    successor = next((entry for entry in USERS if entry["email"] == email), None)
-    if successor is None:
-        raise HTTPException(status_code=404, detail="Client must sign up before admin transfer")
-    if successor["id"] == admin["id"]:
-        raise HTTPException(status_code=400, detail="Choose another account for admin transfer")
-    with DATA_LOCK:
-        admin["role"] = "customer"
-        successor["role"] = "admin"
-        write_data("users.json", USERS)
-    return {"message": f"Admin transferred to {email}. Please log in again."}
+    raise HTTPException(status_code=403, detail="Admin ownership is fixed to ADMIN_EMAIL. Use the confirmed logout flow to hand over this device session.")
 
 
 @app.post("/contact-messages")
@@ -1840,6 +1951,9 @@ async def update_rider_location(
     destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
     destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
     metrics = _order_delivery_metrics(location.lat, location.lng, order)
+    if not metrics["isSamePlaceReached"]:
+        speed_kmh = {"walk": 5, "bike": 15, "motor": 25, "drive": 30, "van": 28, "crew": 12}.get(location.travelMode, 30)
+        metrics["eta"] = f"{max(1, math.ceil(float(metrics['distanceKm']) / speed_kmh * 60))} mins"
     delivered = metrics["status"] == "Delivered"
     point = {
         **location.model_dump(),
@@ -1885,7 +1999,7 @@ async def update_customer_destination(order_id: str, location: CustomerDestinati
         raise HTTPException(status_code=403, detail="Confirm the phone number used for this order")
 
     was_destination_shared = bool(order.get("destinationShared"))
-    order.update(destinationLat=location.lat, destinationLng=location.lng, destinationAddress=location.address.strip(), destinationShared=True, customerLocation={"lat": location.lat, "lng": location.lng, "address": location.address.strip(), "isCustom": location.isCustom, "collectionPointLabel": location.collectionPointLabel.strip()})
+    order.update(destinationLat=location.lat, destinationLng=location.lng, destinationAddress=location.address.strip(), destinationShared=True, initialDistanceKm=round(_distance_km(SHOP_COORDS[0], SHOP_COORDS[1], location.lat, location.lng), 3), customerLocation={"lat": location.lat, "lng": location.lng, "address": location.address.strip(), "isCustom": location.isCustom, "collectionPointLabel": location.collectionPointLabel.strip()})
     point = storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id)
     if not point:
         point = live_locations.get(order_id)
@@ -1938,7 +2052,7 @@ async def update_customer_live_location(order_id: str, location: CustomerLiveLoc
         raise HTTPException(status_code=403, detail="Confirm the phone number used for this order")
     if order.get("approvalStatus") != "approved":
         raise HTTPException(status_code=409, detail="Customer location sharing starts after admin approval")
-    order.update(customerLat=location.lat, customerLng=location.lng, destinationLat=location.lat, destinationLng=location.lng, destinationShared=True)
+    order.update(customerLat=location.lat, customerLng=location.lng, destinationLat=location.lat, destinationLng=location.lng, destinationShared=True, initialDistanceKm=round(_distance_km(SHOP_COORDS[0], SHOP_COORDS[1], location.lat, location.lng), 3))
     if isinstance(order.get("customerLocation"), dict):
         order["customerLocation"].update(lat=location.lat, lng=location.lng)
     point = live_locations.get(order_id) or (storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id))
@@ -2077,8 +2191,8 @@ def onupa_chat(request: OnupaChatRequest, http_request: Request) -> dict[str, An
     _onupa_rate_log[client_ip] = recent
     message = request.message.strip()
     query = message.lower()
-    if any(term in query for term in ("admin", "password", "secret", "api key", "token", "database url", "env file", "show env", "jwt", "hack", "bypass", "server code", "source code", "credentials")):
-        return {"reply": "Sorry charley, I can't share private store details or help bypass account security. I can help you find a cute outfit though. What occasion are you dressing for?", "products": []}
+    if any(term in query for term in ("admin password", "admin email", "admin credentials", "password", "secret", "api key", "token", "database url", "env file", "environment variable", "show env", "jwt", "hack", "bypass", "server code", "source code", "server files", "credentials", "system prompt", "ignore previous instructions")):
+        return {"reply": "Sorry darling, I can't share private store info or help bypass account security. I can help you find a cute outfit though. What occasion are we dressing for?", "products": []}
     catalog = (storage.list_products() if storage.enabled() else list(PRODUCTS))[:30]
     public_products = [item for item in catalog if item.get("status") not in {"out_of_stock", "sold", "just_sold"}]
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -2094,6 +2208,31 @@ def onupa_chat(request: OnupaChatRequest, http_request: Request) -> dict[str, An
             reply = result["candidates"][0]["content"]["parts"][0]["text"].strip()
             return {"reply": reply[:1500], "products": public_products[:3]}
         except (urllib.error.URLError, KeyError, IndexError, ValueError, TimeoutError):
+            pass
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if openai_key:
+        openai_payload = json.dumps({
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message},
+            ],
+            "temperature": 0.8,
+            "max_tokens": 250,
+        }).encode("utf-8")
+        openai_request = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=openai_payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(openai_request, timeout=12) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            reply = result["choices"][0]["message"]["content"].strip()
+            if reply:
+                return {"reply": reply[:1500], "products": public_products[:3]}
+        except (urllib.error.URLError, KeyError, IndexError, TypeError, ValueError, TimeoutError):
             pass
     budget = re.search(r"(?:under|below|less than|budget(?: of)?)\s*(?:ghs?\s*)?(\d+(?:\.\d+)?)", query)
     if budget:
@@ -2139,6 +2278,21 @@ def update_site_content(
     featured_ids = (content.get("featured") or {}).get("productIds", [])
     if not isinstance(featured_ids, list) or len(featured_ids) > 6:
         raise HTTPException(status_code=422, detail="Choose no more than six featured products")
+    hero_slides = content.get("heroSlides", [])
+    if not isinstance(hero_slides, list):
+        raise HTTPException(status_code=422, detail="Hero slides must be a list")
+    if any(not isinstance(slide, dict) for slide in hero_slides):
+        raise HTTPException(status_code=422, detail="Each hero slide must be an object")
+    image_references = [slide.get("imageUrl") for slide in hero_slides if isinstance(slide, dict) and slide.get("imageUrl")]
+    hero_image = (content.get("hero") or {}).get("imageUrl")
+    if hero_image:
+        image_references.append(hero_image)
+    featured_images = (content.get("featured") or {}).get("bannerImages", [])
+    if not isinstance(featured_images, list) or len(featured_images) > 6:
+        raise HTTPException(status_code=422, detail="Choose no more than six featured photos")
+    image_references.extend(featured_images)
+    if any(not _is_allowed_image_reference(image_url) for image_url in image_references):
+        raise HTTPException(status_code=422, detail="Images must use secure HTTPS URLs or uploaded image files")
     if storage.enabled():
         storage.set_store_setting("site_content", content)
     else:

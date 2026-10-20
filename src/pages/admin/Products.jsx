@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ImagePlus, LockKeyhole, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, LockKeyhole, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import api from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
+import ImagePickerNative from '../../components/ImagePickerNative';
+import { uploadContentImage } from '../../utils/uploadContentImage';
 import AdminPageShell from './AdminPageShell';
 
 const CATEGORIES = ['Women', 'Men', 'Dresses', 'Tops', 'Bags', 'Shoes', 'Accessories'];
@@ -42,7 +44,6 @@ export default function Products() {
   const [selected, setSelected] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const inputRef = useRef(null);
   const previewUrlsRef = useRef(new Set());
 
   const reload = () => api.get('/products').then(({ data }) => {
@@ -96,8 +97,15 @@ export default function Products() {
       body.append('price', form.price);
       body.append('description', form.description.trim());
       body.append('status', form.status);
-      body.append('existingImages', JSON.stringify(existingImages));
-      for (const photo of photos) body.append('images', await compressPhoto(photo.file));
+      const uploadedImages = [...existingImages];
+      let uploadBytes = 0;
+      for (const photo of photos) {
+        const compressed = await compressPhoto(photo.file);
+        uploadBytes += compressed.size;
+        if (uploadBytes > 4 * 1024 * 1024) throw new Error('The combined product photos must be 4 MB or smaller.');
+        uploadedImages.push(await uploadContentImage(compressed));
+      }
+      body.append('existingImages', JSON.stringify(uploadedImages));
       if (editing) await api.put(`/products/${editing.id}`, body);
       else await api.post('/products', body);
       await reload();
@@ -189,11 +197,10 @@ export default function Products() {
             <button type="button" aria-label="Close product form" disabled={saving} onClick={() => setFormOpen(false)} className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={20} /></button>
           </header>
           <form onSubmit={handleSave} className="space-y-5 px-4 py-4 sm:px-6">
-            <input ref={inputRef} type="file" accept="image/*" multiple className="sr-only" onChange={event => { appendPhotos(event.target.files); event.target.value = ''; event.target.removeAttribute('capture'); }} />
-            <button type="button" onClick={() => { inputRef.current?.removeAttribute('capture'); inputRef.current?.click(); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); appendPhotos(event.dataTransfer.files); }} className="flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center hover:border-slate-500">
-              <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-slate-700 shadow-sm"><ImagePlus size={24} /></span><span className="text-sm font-bold text-slate-800">Select photo</span><span className="text-xs text-slate-500">Photo Library · Take photo · Choose File · Google Drive</span><span className="text-[10px] text-slate-400">Up to 5 photos · JPEG, PNG or WebP</span>
-            </button>
-            <button type="button" onClick={() => { inputRef.current?.setAttribute('capture', 'environment'); inputRef.current?.click(); }} className="min-h-11 rounded-xl border border-slate-300 px-4 text-xs font-bold text-slate-700">Take photo</button>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <ImagePickerNative multiple disabled={saving} onSelect={appendPhotos} onDrop={appendPhotos} />
+              <p className="text-center text-[10px] text-slate-500">Up to five photos · JPEG, PNG or WebP</p>
+            </div>
             {(existingImages.length > 0 || photos.length > 0) && <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {existingImages.map((url, index) => <div key={`old-${url}-${index}`} className="relative aspect-square overflow-hidden rounded-xl bg-slate-100"><img src={url} alt="Product preview" className="h-full w-full object-cover" /><button type="button" onClick={() => setExistingImages(current => current.filter((_, i) => i !== index))} aria-label="Remove photo" className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-full bg-white shadow"><X size={16} /></button></div>)}
           {photos.map((photo, index) => <div key={`${photo.name}-${index}`} className="relative aspect-square overflow-hidden rounded-xl bg-slate-100"><img src={photo.preview} alt={photo.name} className="h-full w-full object-cover" /><button type="button" onClick={() => { URL.revokeObjectURL(photo.preview); previewUrlsRef.current.delete(photo.preview); setPhotos(current => current.filter((_, i) => i !== index)); }} aria-label="Remove selected photo" className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-full bg-white shadow"><X size={16} /></button></div>)}
