@@ -6,3 +6,5 @@ bcrypt<4.1
 python-multipart
 orjson
 python-dotenv
+psycopg[binary]>=3.2,<4
+webauthn>=2.0,<3

@@ -3,3 +3,7 @@ dist/
 .env
 server/*.json
 server/*.tmp
+__pycache__/
+*.py[cod]
+.vercel
+.env*

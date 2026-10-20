@@ -1,8 +1,19 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
-import { LogOut } from 'lucide-react';
+import { Fingerprint, LogOut, ShieldCheck } from 'lucide-react';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
 import { useAuth } from './context/AuthContext';
-const TrackOrder = lazy(() => import('./components/TrackOrder'));
+const TrackOrder      = lazy(() => import('./components/TrackOrder'));
+const Overview        = lazy(() => import('./pages/admin/Overview'));
+const Products        = lazy(() => import('./pages/admin/Products'));
+const Orders          = lazy(() => import('./pages/admin/Orders'));
+const PendingUsers    = lazy(() => import('./pages/admin/PendingUsers'));
+const ContentManager  = lazy(() => import('./pages/admin/ContentManager'));
+const ProfilePage     = lazy(() => import('./pages/admin/Profile'));
+const SettingsPage    = lazy(() => import('./pages/admin/Settings'));
+const AdminLogin      = lazy(() => import('./pages/admin/AdminLogin'));
+const AdminLayoutComp = lazy(() => import('./pages/admin/AdminLayout'));
+
 
 // Production Initial Catalog
 const INITIAL_PRODUCTS = [
@@ -66,6 +77,8 @@ const ALL_CATEGORIES = [
   "Official dresses"
 ];
 
+const effectivePrice = (product) => Math.round(Number(product?.price || 0) * (100 - Number(product?.discount || 0)) / 100 * 100) / 100;
+
 const optimizeProductImage = (imageUrl) => {
   try {
     const url = new URL(imageUrl);
@@ -84,23 +97,46 @@ const optimizeProductImage = (imageUrl) => {
 };
 
 export default function App() {
-  const { user, role, login, signup, logout } = useAuth();
-  // Navigation State
+  const { user, role, authReady, adminUnlocked, login, logout, unlockAdmin, lockAdmin } = useAuth();
+  const [routePath, setRoutePath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const syncPath = () => setRoutePath(window.location.pathname);
+    window.addEventListener('popstate', syncPath);
+    return () => window.removeEventListener('popstate', syncPath);
+  }, []);
+  useEffect(() => {
+    if (routePath.startsWith('/admin') && routePath !== '/admin-secret-login-rabis2024' && authReady && (!user || role !== 'admin')) {
+      window.history.replaceState({}, '', '/');
+      setRoutePath('/');
+    } else if (routePath === '/admin' && authReady && user?.role === 'admin') {
+      window.history.replaceState({}, '', '/admin/overview');
+      setRoutePath('/admin/overview');
+    }
+  }, [routePath, authReady, user, role]);
+
   const [activeView, setActiveView] = useState('store'); // 'store', 'tracker', 'lookup', 'about', 'contact', 'admin'
+
   const [adminTab, setAdminTab] = useState('overview'); // 'overview', 'approvals', 'messages', 'catalog', 'contact', 'security'
-  const isAdminAuthenticated = role === 'admin';
+  const isAdminAccount = authReady && role === 'admin';
+  const isAdminAuthenticated = isAdminAccount && adminUnlocked;
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
-  const [authName, setAuthName] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
+  const [loginRestricted, setLoginRestricted] = useState(false);
+  const [adminPasskeys, setAdminPasskeys] = useState([]);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyMessage, setPasskeyMessage] = useState('');
+  const [unlockPassword, setUnlockPassword] = useState('');
   const [pendingUsers, setPendingUsers] = useState([]);
   const [riders, setRiders] = useState([]);
   const [transferEmail, setTransferEmail] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedProductModal, setSelectedProductModal] = useState(null);
 
@@ -147,6 +183,7 @@ export default function App() {
       { id: 2, url: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=80', title: "Rabi's Exclusive Chic Collection" }
     ];
   });
+  const [siteContent, setSiteContent] = useState(null);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
 
   // Orders & Messages State
@@ -208,13 +245,34 @@ export default function App() {
   }, [adminContact]);
 
   const currentOrderProduct = products.find(p => p.id === Number(checkoutData.selectedProductId)) || products[0];
-  const orderSubtotal = (currentOrderProduct?.price || 0) * checkoutData.quantity;
+  const orderSubtotal = effectivePrice(currentOrderProduct) * checkoutData.quantity;
   const deliveryFees = { standard: 30, express: 60, outside: 80 };
   const orderDeliveryFee = deliveryFees[checkoutData.deliveryOption];
   const orderTotal = orderSubtotal + orderDeliveryFee;
 
   useEffect(() => {
-    api.get('/products').then(({ data }) => setProducts(data)).catch(() => {});
+    const refreshProducts = () => api.get('/products').then(({ data }) => setProducts(data)).catch(() => {});
+    refreshProducts();
+    window.addEventListener('rabis:content-updated', refreshProducts);
+    return () => window.removeEventListener('rabis:content-updated', refreshProducts);
+  }, []);
+
+  useEffect(() => {
+    api.get('/store-profile')
+      .then(({ data }) => setAdminProfile(data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const refreshContent = () => api.get('/site-content/homepage').then(({ data }) => {
+      setSiteContent(data);
+      const banners = data?.featured?.bannerImages || [];
+      if (banners.length) setSlides(banners.map((url, index) => ({ id: `content-${index}`, url, title: data.hero?.title || 'Rabi’s Chic Collection' })));
+      else if (data?.hero?.imageUrl) setSlides([{ id: 'hero', url: data.hero.imageUrl, title: data.hero.title || 'Rabi’s Chic Collection' }]);
+    }).catch(() => {});
+    refreshContent();
+    window.addEventListener('rabis:content-updated', refreshContent);
+    return () => window.removeEventListener('rabis:content-updated', refreshContent);
   }, []);
 
   useEffect(() => {
@@ -226,6 +284,24 @@ export default function App() {
     }
   }, [isAdminAuthenticated, role]);
 
+  useEffect(() => {
+    if (!isAdminAccount || activeView !== 'admin' || (adminUnlocked && adminTab !== 'security')) return;
+    api.get('/auth/admin/passkeys/status', { useRegularAuth: true })
+      .then(({ data }) => setAdminPasskeys(data.passkeys || []))
+      .catch(() => setAdminPasskeys([]));
+  }, [activeView, adminTab, adminUnlocked, isAdminAccount]);
+
+  useEffect(() => {
+    if (!adminUnlocked) return undefined;
+    const timeoutId = window.setTimeout(() => {
+      lockAdmin();
+      window.history.replaceState({}, '', '/admin-secret-login-rabis2024');
+      setRoutePath('/admin-secret-login-rabis2024');
+      setPasskeyMessage('For your security, the admin dashboard locked after 15 minutes.');
+    }, 15 * 60 * 1000);
+    return () => window.clearTimeout(timeoutId);
+  }, [adminUnlocked]);
+
   const validateGhanaPhone = (phoneNum) => {
     const cleaned = phoneNum.replace(/[\s-]/g, '');
     const ghanaRegex = /^(?:\+233|233|0)[23579]\d{8}$/;
@@ -235,11 +311,10 @@ export default function App() {
   const handleSearchKeyPress = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      const match = products.find(p => p.name.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+      const match = searchResults[0];
       if (match) {
         setSelectedProductModal(match);
-      } else if (filteredProducts.length > 0) {
-        setSelectedProductModal(filteredProducts[0]);
+        setSearchFocused(false);
       }
     }
   };
@@ -353,6 +428,48 @@ export default function App() {
     }
   };
 
+  const handleProfileImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setProfileMessage('Choose an image file.');
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      let image = canvas.toDataURL('image/webp', 0.78);
+      if (image.length > 900_000) image = canvas.toDataURL('image/jpeg', 0.62);
+      setAdminProfile(current => ({ ...current, avatar: image }));
+      setProfileMessage('Photo selected. Save the profile to publish it.');
+    } catch {
+      setProfileMessage('Could not read that image. Try a JPEG, PNG, or WebP file.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const saveAdminProfile = async (event) => {
+    event.preventDefault();
+    setProfileSaving(true);
+    setProfileMessage('');
+    try {
+      const { data } = await api.put('/store-profile', adminProfile);
+      setAdminProfile(data);
+      localStorage.setItem('rabi_admin_profile', JSON.stringify(data));
+      setProfileMessage('Profile saved and published to the About page.');
+    } catch (error) {
+      setProfileMessage(error.response?.data?.detail || 'Could not save the profile.');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
   const transferAdmin = async (event) => {
     event.preventDefault();
     try {
@@ -362,6 +479,61 @@ export default function App() {
       alert(`Admin access transferred to ${transferEmail}. You are now logged out.`);
     } catch (error) {
       alert(error.response?.data?.detail || 'Could not transfer admin access.');
+    }
+  };
+
+  const registerAdminPasskey = async () => {
+    setPasskeyBusy(true);
+    setPasskeyMessage('');
+    try {
+      const { data: ceremony } = await api.post('/auth/admin/passkeys/registration/options');
+      const credential = await startRegistration({ optionsJSON: ceremony.options });
+      const { data } = await api.post('/auth/admin/passkeys/registration/verify', {
+        challenge_token: ceremony.challenge_token,
+        credential,
+        label: 'This device',
+      });
+      setAdminPasskeys(data.passkeys || []);
+      setPasskeyMessage('Device passkey is ready. You can use Face ID, fingerprint, or your device PIN to unlock.');
+    } catch (error) {
+      setPasskeyMessage(error.response?.data?.detail || error.message || 'Passkey setup did not complete.');
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
+
+  const unlockAdminWithPasskey = async () => {
+    setPasskeyBusy(true);
+    setPasskeyMessage('');
+    try {
+      const { data: ceremony } = await api.post('/auth/admin/passkeys/authentication/options', {}, { useRegularAuth: true });
+      const credential = await startAuthentication({ optionsJSON: ceremony.options });
+      const { data } = await api.post('/auth/admin/passkeys/authentication/verify', {
+        challenge_token: ceremony.challenge_token,
+        credential,
+      }, { useRegularAuth: true });
+      unlockAdmin(data.admin_access_token);
+      setPasskeyMessage('Admin dashboard unlocked.');
+    } catch (error) {
+      setPasskeyMessage(error.response?.data?.detail || error.message || 'Device verification was not completed.');
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
+
+  const unlockAdminWithPassword = async (event) => {
+    event.preventDefault();
+    setPasskeyBusy(true);
+    setPasskeyMessage('');
+    try {
+      const { data } = await api.post('/auth/admin/unlock/password', { password: unlockPassword }, { useRegularAuth: true });
+      unlockAdmin(data.admin_access_token);
+      setUnlockPassword('');
+      setPasskeyMessage('Admin dashboard unlocked.');
+    } catch (error) {
+      setPasskeyMessage(error.response?.data?.detail || 'Password did not match.');
+    } finally {
+      setPasskeyBusy(false);
     }
   };
 
@@ -409,12 +581,49 @@ export default function App() {
 
   const filteredProducts = products.filter(p => {
     const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const matchesSearch = !normalizedQuery || [p.name, p.description, p.category]
+      .some(value => value?.toLowerCase().includes(normalizedQuery));
     return matchesCategory && matchesSearch;
   });
+  const searchResults = searchQuery.trim()
+    ? products.filter(product => [product.name, product.description, product.category]
+      .some(value => value?.toLowerCase().includes(searchQuery.trim().toLowerCase())))
+    : [];
 
   const activeTrackingOrder = selectedOrderForTracking || orders[0];
+  const publicHero = siteContent?.hero || {};
+
+  if (routePath === '/admin-secret-login-rabis2024') {
+    return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }} />
+    </Suspense>;
+  }
+
+  if (routePath.startsWith('/admin')) {
+    if (!authReady) return <div className="min-h-screen bg-rose-50/40" />;
+    if (!user || role !== 'admin') return null;
+    if (!adminUnlocked) return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
+      <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }} />
+    </Suspense>;
+    const pages = {
+      '/admin/overview': <Overview />,
+      '/admin/products': <Products />,
+      '/admin/orders': <Orders />,
+      '/admin/users': <PendingUsers />,
+      '/admin/content': <ContentManager />,
+      '/admin/profile': <ProfilePage />,
+      '/admin/settings': <SettingsPage adminContact={adminContact} setAdminContact={setAdminContact} transferEmail={transferEmail} setTransferEmail={setTransferEmail} />,
+    };
+    const path = routePath === '/admin' ? '/admin/overview' : routePath;
+    return <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
+      <AdminLayoutComp adminProfile={adminProfile} orders={orders} messages={messages}
+        onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
+        onLogout={() => { logout(); window.history.replaceState({}, '', '/'); setRoutePath('/'); }}>
+        {pages[path] || pages['/admin/overview']}
+      </AdminLayoutComp>
+    </Suspense>;
+  }
 
   return (
     <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
@@ -446,7 +655,7 @@ export default function App() {
                 <div className="space-y-3 pt-3 border-t border-rose-100">
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400 font-bold uppercase">Price</span>
-                    <span className="text-2xl font-black text-slate-900">GH₵ {selectedProductModal.price}</span>
+                    <span className="text-2xl font-black text-slate-900">GH₵ {effectivePrice(selectedProductModal)}</span>
                   </div>
                   <button 
                     onClick={() => {
@@ -529,16 +738,39 @@ export default function App() {
               <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
               <input 
                 type="text"
-                placeholder="Search items & press Enter to view details..."
+                placeholder="Search products..."
                 value={searchQuery}
                 onKeyDown={handleSearchKeyPress}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => window.setTimeout(() => setSearchFocused(false), 150)}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search products"
+                aria-expanded={searchFocused && Boolean(searchQuery.trim())}
+                aria-controls="product-search-results"
                 className="w-full pl-9 pr-8 py-2 rounded-2xl bg-rose-50/60 border border-rose-200 text-xs text-slate-800 focus:outline-none focus:border-rose-500 focus:bg-white transition font-medium"
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600">
                   <i className="fa-solid fa-xmark"></i>
                 </button>
+              )}
+              {searchFocused && searchQuery.trim() && (
+                <div id="product-search-results" role="listbox" className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border border-rose-100 bg-white p-1 shadow-xl">
+                  {searchResults.length ? searchResults.slice(0, 6).map(product => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      role="option"
+                      aria-selected="false"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => { setSelectedProductModal(product); setSearchFocused(false); }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-rose-50"
+                    >
+                      <img src={optimizeProductImage(product.mainImage)} loading="lazy" alt="" className="h-11 w-9 rounded object-cover" />
+                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-slate-900">{product.name}</span><span className="text-[10px] text-slate-500">{product.category} · GH₵ {product.price}</span></span>
+                    </button>
+                  )) : <p role="status" className="px-3 py-3 text-xs text-slate-500">No products match “{searchQuery.trim()}”.</p>}
+                </div>
               )}
             </div>
           </div>
@@ -579,12 +811,20 @@ export default function App() {
               <i className="fa-solid fa-address-book"></i> Contact
             </button>
 
-            <button 
-              onClick={() => setActiveView('admin')}
-              className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'admin' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-            >
-              <i className={`fa-solid ${role === 'admin' ? 'fa-user-shield' : 'fa-right-to-bracket'}`}></i> {role === 'admin' ? 'Admin' : 'Login'}
-            </button>
+            {/* Admin entry is only visible to authenticated admins */}
+            {isAdminAuthenticated && (
+              <button
+                onClick={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }}
+                className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'admin' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >
+                <i className="fa-solid fa-user-shield"></i> Admin Portal
+              </button>
+            )}
+            {isAdminAccount && !adminUnlocked && (
+              <button onClick={() => { window.history.pushState({}, '', '/admin/overview'); setRoutePath('/admin/overview'); }} className="flex items-center gap-1 whitespace-nowrap rounded-xl bg-slate-900 px-2.5 py-2 text-xs font-bold text-white">
+                <Fingerprint size={15} /> Unlock Admin
+              </button>
+            )}
             {user && (
               <button onClick={() => { logout(); setActiveView('store'); }} className="px-2.5 py-2 text-xs font-bold text-slate-600 flex items-center gap-1" title="Log out">
                 <LogOut size={15} /> Logout
@@ -650,6 +890,17 @@ export default function App() {
             </div>
           </div>
 
+          {siteContent?.featured?.productIds?.length > 0 && <section className="space-y-4">
+            <div><h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">Featured Picks</h3><p className="mt-1 text-xs text-slate-500">Handpicked for your next look.</p></div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+              {siteContent.featured.productIds.map(id => products.find(item => String(item.id) === String(id))).filter(Boolean).map(product => <button key={product.id} onClick={() => setSelectedProductModal(product)} className="overflow-hidden rounded-2xl border border-rose-100 bg-white text-left shadow-sm">
+                <img src={optimizeProductImage(product.mainImage)} alt={product.name} className="h-36 w-full object-cover" />
+                <span className="block truncate px-3 pt-2 text-xs font-bold text-slate-900">{product.name}</span>
+                <span className="block px-3 pb-3 text-xs text-rose-700">GH₵ {effectivePrice(product)}</span>
+              </button>)}
+            </div>
+          </section>}
+
           {/* PRODUCTS GRID */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
             {filteredProducts.map(product => (
@@ -675,7 +926,8 @@ export default function App() {
                 <div className="mt-4 pt-3 border-t border-rose-50 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] text-slate-400 font-medium block">Price</span>
-                    <div className="text-base md:text-lg font-black text-slate-900">GH₵ {product.price}</div>
+                    <div className="text-base md:text-lg font-black text-slate-900">GH₵ {effectivePrice(product)}</div>
+                    {Number(product.discount) > 0 && <div className="text-[10px] text-slate-500"><span className="line-through">GH₵ {product.price}</span> · {product.discount}% off</div>}
                   </div>
                   <button 
                     onClick={(e) => {
@@ -897,8 +1149,7 @@ export default function App() {
       )}
 
       {/* LIVE TRACKING MAP VIEW */}
-      {activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
-  {activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
+      {activeView === 'tracker' && <Suspense fallback={<main className="max-w-5xl mx-auto px-4 py-12 text-center text-slate-500">Loading delivery map...</main>}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>}
 
       {/* LOOKUP VIEW */}
       {activeView === 'lookup' && (
@@ -965,7 +1216,7 @@ export default function App() {
         <main className="max-w-4xl mx-auto px-4 py-12 space-y-10">
           <div className="bg-white p-8 md:p-12 rounded-3xl border border-rose-100 shadow-sm text-center space-y-4">
             <img src={adminProfile.avatar} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-rose-200 shadow-md" alt="Rabi" />
-            <h2 className="text-3xl font-serif font-bold text-slate-900">About Rabi's Chic Store</h2>
+            <h2 className="text-3xl font-serif font-bold text-slate-900">About {adminProfile.name || "Rabi's Chic Store"}</h2>
             <p className="text-xs md:text-sm text-rose-600 font-semibold max-w-lg mx-auto">{adminProfile.title}</p>
             <p className="text-xs md:text-sm text-slate-600 max-w-2xl mx-auto leading-relaxed mt-2">{adminProfile.bio}</p>
           </div>
@@ -1104,49 +1355,64 @@ export default function App() {
       {/* ADMIN VIEW WITH VERTICAL LEFT SIDEBAR & GLASSMORPHISM THEME */}
       {activeView === 'admin' && (
         <main className="max-w-7xl mx-auto px-4 py-8">
-          {!isAdminAuthenticated ? (
+          {isAdminAccount && !adminUnlocked ? (
+            <section className="mx-auto max-w-md space-y-5 rounded-2xl border border-rose-100 bg-white p-7 text-center shadow-sm">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-100 text-rose-700"><ShieldCheck size={26} /></div>
+              <div>
+                <h2 className="font-serif text-2xl font-bold text-slate-900">Unlock admin dashboard</h2>
+                <p className="mt-2 text-sm text-slate-600">Signed in as {user.email}. Verify with this device to continue.</p>
+              </div>
+              {adminPasskeys.length > 0 && <button onClick={unlockAdminWithPasskey} disabled={passkeyBusy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3.5 text-sm font-bold text-white disabled:opacity-60"><Fingerprint size={19} />{passkeyBusy ? 'Waiting for device…' : 'Use Face ID, fingerprint, or device PIN'}</button>}
+              {adminPasskeys.length === 0 && <p className="rounded-xl bg-amber-50 p-3 text-left text-xs text-amber-900">No device passkey is registered yet. Unlock with your admin password, then set one up in Security.</p>}
+              <details className="rounded-xl border border-slate-200 p-3 text-left">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-700">Use admin password instead</summary>
+                <form onSubmit={unlockAdminWithPassword} className="mt-3 space-y-3">
+                  <input type="password" required autoComplete="current-password" value={unlockPassword} onChange={(event) => setUnlockPassword(event.target.value)} placeholder="Admin password" className="w-full rounded-lg border border-rose-200 px-3 py-2.5 text-sm" />
+                  <button type="submit" disabled={passkeyBusy} className="w-full rounded-lg bg-rose-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{passkeyBusy ? 'Verifying…' : 'Unlock with password'}</button>
+                </form>
+              </details>
+              {passkeyMessage && <p role="status" className="text-xs text-slate-600">{passkeyMessage}</p>}
+              <button onClick={() => { lockAdmin(); setActiveView('store'); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800">Back to store</button>
+            </section>
+          ) : !isAdminAuthenticated ? (
             <div className="bg-white/80 backdrop-blur-xl p-8 md:p-12 rounded-3xl border border-white/60 shadow-xl max-w-md mx-auto text-center space-y-6">
               <div className="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center mx-auto text-2xl shadow">
                 <i className="fa-solid fa-user-shield"></i>
               </div>
               <div>
-                <h2 className="text-2xl font-serif font-bold text-slate-900">{user ? 'Account access' : isSigningUp ? 'Create account' : 'Admin Portal Login'}</h2>
-                <p className="text-xs text-slate-500 mt-1">{user ? `Signed in as ${user.email}` : 'Sign in with your account. New accounts require admin approval.'}</p>
+                <h2 className="text-2xl font-serif font-bold text-slate-900">{user ? 'Account access' : 'Admin sign-in'}</h2>
+                <p className="text-xs text-slate-500 mt-1">{user ? `Signed in as ${user.email}` : 'This area is restricted to authorized administrators.'}</p>
               </div>
 
               {user ? (
                 <div className="space-y-4">
-                  <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{role === 'rider' ? 'Courier access is available from the courier dashboard.' : "You need to be an admin or wait for admin's approval."}</p>
+                  <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{role === 'rider' ? 'This area is restricted to administrators. Contact the store for assistance.' : 'This area is restricted to administrators. Please contact Rabi on WhatsApp for help.'}</p>
+                  <a href={`https://wa.me/${adminContact.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hello, I need help with access to Rabi’s Chic store.')}`} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>
                   <button onClick={() => { logout(); setAuthMessage(''); }} className="w-full rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white">Logout</button>
                 </div>
               ) : <form onSubmit={async (e) => {
                 e.preventDefault();
                 setAuthError(false);
+                setLoginRestricted(false);
                 setAuthMessage('');
                 try {
-                  if (isSigningUp) {
-                    const result = await signup(authEmail, adminPasswordInput, authName);
-                    setAuthMessage(result.message === 'Account created' ? 'Account created. Wait for Rabi to approve access, then sign in.' : result.message);
-                    setIsSigningUp(false);
-                  } else {
-                    const account = await login(authEmail, adminPasswordInput);
-                    setAuthMessage(account.role === 'admin' ? '' : "You need to be an admin or wait for admin's approval.");
+                  const account = await login(authEmail, adminPasswordInput);
+                  if (account.role !== 'admin') {
+                    logout();
+                    setLoginRestricted(true);
+                    setAuthMessage('Admin access is restricted. Please contact Rabi on WhatsApp for assistance.');
                   }
                 } catch (error) {
                   setAuthMessage(error.response?.data?.detail || 'Could not authenticate. Check your details and try again.');
                   setAuthError(true);
                 }
               }} className="space-y-4">
-                {isSigningUp && (
-                  <input type="text" required maxLength="100" placeholder="Full name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm" />
-                )}
                 <input type="email" required autoComplete="email" placeholder="Email address" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm" />
                 <input
                   type="password"
                   required
-                  minLength={isSigningUp ? 12 : 1}
-                  autoComplete={isSigningUp ? 'new-password' : 'current-password'}
-                  placeholder={isSigningUp ? 'Password (at least 12 characters)' : 'Password'}
+                  autoComplete="current-password"
+                  placeholder="Password"
                   value={adminPasswordInput}
                   onChange={(e) => setAdminPasswordInput(e.target.value)}
                   className="w-full px-4 py-3.5 rounded-2xl border border-rose-200 text-sm"
@@ -1161,11 +1427,9 @@ export default function App() {
                   type="submit"
                   className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow-lg transition uppercase tracking-wider"
                 >
-                  {isSigningUp ? 'Create account' : 'Sign in'}
+                  Sign in
                 </button>
-                <button type="button" onClick={() => { setIsSigningUp(!isSigningUp); setAuthError(false); setAuthMessage(''); }} className="w-full text-xs font-bold text-rose-700">
-                  {isSigningUp ? 'Already registered? Sign in' : 'Create an account'}
-                </button>
+                {loginRestricted && <a href={`https://wa.me/${adminContact.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent('Hello, I need help with access to Rabi’s Chic store.')}`} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-xs font-bold text-white"><i className="fa-brands fa-whatsapp text-base"></i> Contact Rabi on WhatsApp</a>}
               </form>}
             </div>
           ) : (
@@ -1176,8 +1440,19 @@ export default function App() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
               
-              {/* VERTICAL LEFT SIDEBAR NAV */}
-              <aside className="md:col-span-1 bg-white/70 backdrop-blur-md p-4 rounded-3xl border border-white/80 shadow-sm space-y-6">
+              {/* VERTICAL LEFT SIDEBAR NAV - AdminLayoutComp */}
+              <Suspense fallback={null}>
+              <AdminLayoutComp
+                adminTab={adminTab}
+                setAdminTab={setAdminTab}
+                adminProfile={adminProfile}
+                orders={orders}
+                messages={messages}
+                lockAdmin={lockAdmin}
+                setActiveView={setActiveView}
+              />
+              </Suspense>
+              {false && <aside className="md:col-span-1 bg-white/70 backdrop-blur-md p-4 rounded-3xl border border-white/80 shadow-sm space-y-6">
                 <div className="flex items-center gap-3 p-2">
                   <img src={adminProfile.avatar} className="w-12 h-12 rounded-2xl object-cover border-2 border-rose-200 shadow" alt="Admin" />
                   <div>
@@ -1227,21 +1502,32 @@ export default function App() {
                   >
                     <i className="fa-solid fa-sliders text-sm"></i> Contact Settings
                   </button>
+                  <button
+                    onClick={() => setAdminTab('profile')}
+                    className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center gap-3 ${adminTab === 'profile' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
+                  >
+                    <i className="fa-solid fa-user-pen text-sm"></i> Profile
+                  </button>
                   <button 
                     onClick={() => setAdminTab('security')}
                     className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition flex items-center gap-3 ${adminTab === 'security' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-rose-50'}`}
                   >
                     <i className="fa-solid fa-lock text-sm"></i> Security
                   </button>
+                  <button
+                    onClick={() => { lockAdmin(); setPasskeyMessage('Admin dashboard locked. Verify to unlock it again.'); }}
+                    className="w-full px-4 py-3 rounded-2xl text-xs font-bold text-slate-700 transition flex items-center gap-3 hover:bg-rose-50"
+                  >
+                    <i className="fa-solid fa-lock text-sm"></i> Lock Dashboard
+                  </button>
+                  <button
+                    onClick={() => { logout(); setActiveView('store'); }}
+                    className="w-full px-4 py-3 rounded-2xl text-xs font-bold text-rose-700 transition flex items-center gap-3 hover:bg-rose-50"
+                  >
+                    <LogOut size={16} /> Logout
+                  </button>
                 </div>
-
-                <button 
-                  onClick={() => { logout(); setActiveView('store'); }}
-                  className="w-full py-2.5 bg-rose-100 text-rose-700 rounded-2xl text-xs font-bold hover:bg-rose-200 transition flex items-center justify-center gap-2"
-                >
-                  <i className="fa-solid fa-right-from-bracket"></i> Lock Dashboard
-                </button>
-              </aside>
+              </aside>}
 
               {/* MAIN CONTENT AREA */}
               <section className="md:col-span-3">
@@ -1474,6 +1760,39 @@ export default function App() {
                   </div>
                 )}
 
+                {adminTab === 'profile' && (
+                  <form onSubmit={saveAdminProfile} className="max-w-2xl space-y-6 rounded-2xl border border-rose-100 bg-white/80 p-6 md:p-8">
+                    <div>
+                      <h3 className="font-serif text-xl font-bold text-slate-900">Store profile</h3>
+                      <p className="mt-1 text-xs text-slate-500">These details and the photo appear on the public About page.</p>
+                    </div>
+                    <div className="flex flex-col items-center gap-4 border-b border-rose-100 pb-5 sm:flex-row">
+                      <img src={adminProfile.avatar} alt={`${adminProfile.name} profile preview`} className="h-24 w-24 rounded-full border-4 border-rose-100 object-cover" />
+                      <div className="space-y-2 text-center sm:text-left">
+                        <label htmlFor="admin-profile-image" className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-50">
+                          <i className="fa-solid fa-image"></i> Select profile photo
+                        </label>
+                        <input id="admin-profile-image" type="file" accept="image/*" onChange={handleProfileImageChange} className="sr-only" />
+                        <p className="text-[11px] text-slate-500">Image is resized before upload.</p>
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="profile-display-name" className="mb-1 block text-xs font-bold uppercase text-slate-600">Display name</label>
+                      <input id="profile-display-name" type="text" required maxLength={80} value={adminProfile.name} onChange={(event) => setAdminProfile({ ...adminProfile, name: event.target.value })} className="w-full rounded-xl border border-rose-200 px-4 py-3 text-sm" />
+                    </div>
+                    <div>
+                      <label htmlFor="profile-title" className="mb-1 block text-xs font-bold uppercase text-slate-600">Title</label>
+                      <input id="profile-title" type="text" maxLength={140} value={adminProfile.title} onChange={(event) => setAdminProfile({ ...adminProfile, title: event.target.value })} className="w-full rounded-xl border border-rose-200 px-4 py-3 text-sm" />
+                    </div>
+                    <div>
+                      <label htmlFor="profile-bio" className="mb-1 block text-xs font-bold uppercase text-slate-600">About</label>
+                      <textarea id="profile-bio" rows="4" maxLength={1200} value={adminProfile.bio} onChange={(event) => setAdminProfile({ ...adminProfile, bio: event.target.value })} className="w-full rounded-xl border border-rose-200 px-4 py-3 text-sm" />
+                    </div>
+                    {profileMessage && <p role="status" className="text-xs text-slate-600">{profileMessage}</p>}
+                    <button type="submit" disabled={profileSaving} className="rounded-xl bg-slate-900 px-5 py-3 text-xs font-bold text-white disabled:opacity-60">{profileSaving ? 'Saving…' : 'Save and publish profile'}</button>
+                  </form>
+                )}
+
                 {/* ADMIN TAB: CONTACT SETTINGS */}
                 {adminTab === 'contact' && (
                   <div className="bg-white/70 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/80 shadow-sm space-y-6">
@@ -1497,24 +1816,6 @@ export default function App() {
                           className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
                         />
                       </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Store Owner Title</label>
-                        <input 
-                          type="text"
-                          value={adminProfile.title}
-                          onChange={(e) => setAdminProfile({ ...adminProfile, title: e.target.value })}
-                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">About & Bio</label>
-                        <textarea 
-                          rows="3"
-                          value={adminProfile.bio}
-                          onChange={(e) => setAdminProfile({ ...adminProfile, bio: e.target.value })}
-                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs bg-white"
-                        ></textarea>
-                      </div>
                       <button 
                         onClick={() => alert("Contact information updated!")}
                         className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-2xl shadow transition"
@@ -1528,6 +1829,23 @@ export default function App() {
                 {/* ADMIN TAB: CLIENT HANDOVER AND ACCOUNT APPROVALS */}
                 {adminTab === 'security' && (
                   <div className="space-y-6">
+                    <section className="rounded-2xl border border-rose-100 bg-white/80 p-6 md:p-8 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-700"><Fingerprint size={20} /></span>
+                        <div>
+                          <h3 className="font-serif font-bold text-xl text-slate-900">Device passkey</h3>
+                          <p className="mt-1 text-xs text-slate-600">Set up Face ID, fingerprint, Windows Hello, or your device PIN to unlock the admin dashboard without retyping your password.</p>
+                        </div>
+                      </div>
+                      {adminPasskeys.length > 0 ? (
+                        <div className="space-y-2">
+                          {adminPasskeys.map(passkey => <p key={passkey.id} className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900"><ShieldCheck size={14} className="mr-2 inline" />{passkey.label} registered</p>)}
+                          <button onClick={registerAdminPasskey} disabled={passkeyBusy} className="rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-bold text-rose-800 disabled:opacity-60">{passkeyBusy ? 'Waiting for device…' : 'Add another passkey'}</button>
+                        </div>
+                      ) : <button onClick={registerAdminPasskey} disabled={passkeyBusy} className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white disabled:opacity-60"><Fingerprint size={17} />{passkeyBusy ? 'Waiting for device…' : 'Set up this device'}</button>}
+                      {passkeyMessage && <p role="status" className="text-xs text-slate-600">{passkeyMessage}</p>}
+                    </section>
+
                     <section className="bg-amber-50 p-6 md:p-8 rounded-2xl border border-amber-200 space-y-4">
                       <div>
                         <h3 className="font-serif font-bold text-xl text-slate-900">Client handover</h3>
@@ -1553,6 +1871,20 @@ export default function App() {
                       ))}
                     </section>
                   </div>
+                )}
+
+                {/* ADMIN TAB: CONTENT MANAGER */}
+                {adminTab === "content" && (
+                  <Suspense fallback={<div className="text-xs text-slate-400 p-4">Loading...</div>}>
+                    <ContentManager />
+                  </Suspense>
+                )}
+
+                {/* ADMIN TAB: USERS */}
+                {adminTab === "users" && (
+                  <Suspense fallback={<div className="text-xs text-slate-400 p-4">Loading...</div>}>
+                    <PendingUsers />
+                  </Suspense>
                 )}
 
               </section>
