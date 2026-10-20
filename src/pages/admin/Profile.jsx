@@ -37,6 +37,7 @@ export default function Profile() {
       const { data } = await api.put('/store-profile', profile);
       setProfile(data);
       localStorage.setItem('rabi_admin_profile', JSON.stringify(data));
+      localStorage.setItem('rabis_profile_updated_at', String(Date.now()));
       window.dispatchEvent(new Event('rabis:profile-updated'));
       setMessage('Profile saved and published to the About page.');
     } catch (err) {

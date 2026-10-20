@@ -19,6 +19,10 @@
       "dest": "api/index.py"
     },
     {
+      "src": "^/rabis-admin$",
+      "dest": "/index.html"
+    },
+    {
       "src": "^/admin-secret-login-rabis2024$",
       "dest": "/index.html"
     },

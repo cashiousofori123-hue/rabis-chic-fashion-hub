@@ -250,15 +250,25 @@ export default function App() {
     const refreshContact = () => api.get('/store-contact')
       .then(({ data }) => setAdminContact(data))
       .catch(() => {});
+    const syncContact = (event) => { if (event.key === 'rabis_contact_updated_at') refreshContact(); };
     window.addEventListener('rabis:contact-updated', refreshContact);
-    return () => window.removeEventListener('rabis:contact-updated', refreshContact);
+    window.addEventListener('storage', syncContact);
+    return () => {
+      window.removeEventListener('rabis:contact-updated', refreshContact);
+      window.removeEventListener('storage', syncContact);
+    };
   }, []);
 
   useEffect(() => {
     const refreshProducts = () => api.get('/products').then(({ data }) => setProducts(data)).catch(() => {});
+    const syncProducts = (event) => { if (event.key === 'rabis_content_updated_at') refreshProducts(); };
     refreshProducts();
     window.addEventListener('rabis:content-updated', refreshProducts);
-    return () => window.removeEventListener('rabis:content-updated', refreshProducts);
+    window.addEventListener('storage', syncProducts);
+    return () => {
+      window.removeEventListener('rabis:content-updated', refreshProducts);
+      window.removeEventListener('storage', syncProducts);
+    };
   }, []);
 
   useEffect(() => {
@@ -268,8 +278,13 @@ export default function App() {
     const refreshProfile = () => api.get('/store-profile')
       .then(({ data }) => setAdminProfile(data))
       .catch(() => {});
+    const syncProfile = (event) => { if (event.key === 'rabis_profile_updated_at') refreshProfile(); };
     window.addEventListener('rabis:profile-updated', refreshProfile);
-    return () => window.removeEventListener('rabis:profile-updated', refreshProfile);
+    window.addEventListener('storage', syncProfile);
+    return () => {
+      window.removeEventListener('rabis:profile-updated', refreshProfile);
+      window.removeEventListener('storage', syncProfile);
+    };
   }, []);
 
   useEffect(() => {
@@ -279,9 +294,14 @@ export default function App() {
       if (banners.length) setSlides(banners.map((url, index) => ({ id: `content-${index}`, url, title: data.hero?.title || 'Rabi’s Chic Collection' })));
       else if (data?.hero?.imageUrl) setSlides([{ id: 'hero', url: data.hero.imageUrl, title: data.hero.title || 'Rabi’s Chic Collection' }]);
     }).catch(() => {});
+    const syncContent = (event) => { if (event.key === 'rabis_content_updated_at') refreshContent(); };
     refreshContent();
     window.addEventListener('rabis:content-updated', refreshContent);
-    return () => window.removeEventListener('rabis:content-updated', refreshContent);
+    window.addEventListener('storage', syncContent);
+    return () => {
+      window.removeEventListener('rabis:content-updated', refreshContent);
+      window.removeEventListener('storage', syncContent);
+    };
   }, []);
 
   useEffect(() => {
@@ -311,8 +331,8 @@ export default function App() {
       }
       lockAdmin();
       if (window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin-secret-login-rabis2024') {
-        window.history.replaceState({}, '', '/admin-secret-login-rabis2024');
-        setRoutePath('/admin-secret-login-rabis2024');
+        window.history.replaceState({}, '', '/rabis-admin');
+        setRoutePath('/rabis-admin');
       }
       setPasskeyMessage('For your security, admin access expires after 30 minutes. Sign in again to continue.');
     };
@@ -627,7 +647,7 @@ export default function App() {
   const adminWhatsAppHref = whatsappLink(adminContact.whatsapp);
   const adminWhatsAppMessageHref = whatsappLink(adminContact.whatsapp, 'Hello Rabi, I need clarification on my UCC hostel order.');
 
-  if (routePath === '/admin-secret-login-rabis2024') {
+  if (routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
     return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
       <AdminLogin onSuccess={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
@@ -877,8 +897,11 @@ export default function App() {
                   <span className="bg-rose-500 text-white text-[9px] md:text-[10px] font-extrabold px-3 py-1 rounded-full uppercase tracking-wider w-max mb-2">
                     UCC Campus Exclusive
                   </span>
-                  <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight">{slides[currentSlideIndex]?.title}</h2>
-                  <p className="text-xs md:text-sm text-rose-100 mt-1">Fast UCC hostel delivery with real Google Maps live GPS tracking!</p>
+                  <h2 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight">{publicHero.title || slides[currentSlideIndex]?.title}</h2>
+                  <p className="text-xs md:text-sm text-rose-100 mt-1">{publicHero.subtitle || 'Fast UCC hostel delivery with real Google Maps live GPS tracking!'}</p>
+                  <a href={publicHero.ctaLink || '#store'} className="mt-4 inline-flex w-max items-center rounded-xl bg-rose-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:bg-rose-600">
+                    {publicHero.ctaText || 'Shop Now'}
+                  </a>
                 </div>
               </>
             )}
@@ -897,7 +920,7 @@ export default function App() {
           </div>
 
           {/* CATEGORIES */}
-          <div className="space-y-4">
+          <div id="store" className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">Browse Collections</h3>
               <span className="text-xs text-rose-500 font-semibold">{filteredProducts.length} Items</span>

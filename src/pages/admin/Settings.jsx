@@ -22,6 +22,7 @@ export default function Settings({ adminContact, setAdminContact, transferEmail,
       const { data } = await api.put('/store-contact', adminContact);
       setAdminContact(data);
       localStorage.setItem('rabi_admin_contact', JSON.stringify(data));
+      localStorage.setItem('rabis_contact_updated_at', String(Date.now()));
       window.dispatchEvent(new Event('rabis:contact-updated'));
       setMsg('Contact details saved and published for customers.');
     } catch (error) {

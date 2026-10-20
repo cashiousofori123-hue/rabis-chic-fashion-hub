@@ -6,7 +6,7 @@ import api from '../../api';
 
 /**
  * Professional Admin Sign-In card.
- * Route: hidden – accessed via hash #admin-secret-login-rabis2024
+ * Admin sign-in route: /rabis-admin
  * Tabs: [Password Login] | [Passkey Login (Face ID / Fingerprint)]
  */
 export default function AdminLogin({ onSuccess }) {

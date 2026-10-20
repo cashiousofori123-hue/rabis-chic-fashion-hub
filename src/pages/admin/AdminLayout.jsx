@@ -1,4 +1,4 @@
-import { ArrowRight, BarChart3, Box, CheckCircle2, FileImage, LogOut, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const GROUPS = [
@@ -53,6 +53,12 @@ export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
             </div>
           </section>
         ))}
+
+        <a href="/" target="_blank" rel="noreferrer" className="flex w-full items-center gap-3 rounded-xl bg-white p-4 text-sm font-bold text-slate-800 shadow-sm hover:bg-gray-50">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-700"><ExternalLink size={18} /></span>
+          <span className="flex-1">Visit the Site</span>
+          <ArrowRight className="text-slate-400" size={18} />
+        </a>
 
         <button type="button" onClick={onLogout} className="flex w-full items-center justify-center gap-2 rounded-xl bg-white p-4 text-sm font-bold text-red-600 shadow-sm hover:bg-red-50">
           <LogOut size={17} /> Log Out

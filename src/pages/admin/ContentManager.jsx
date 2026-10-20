@@ -31,6 +31,7 @@ export default function ContentManager() {
     setSaving(true); setMsg('');
     try {
       await api.put('/site-content/homepage', { ...content, products });
+      localStorage.setItem('rabis_content_updated_at', String(Date.now()));
       window.dispatchEvent(new Event('rabis:content-updated'));
       setMsg('Content saved successfully!');
     } catch (err) {
