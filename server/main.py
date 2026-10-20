@@ -944,6 +944,11 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         user = _ensure_configured_admin_user(email, configured_password)
     if not _is_configured_admin(user):
         raise HTTPException(status_code=401, detail="Invalid admin email or password")
+    if _list_passkeys(user["id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="This admin account is secured with a device passkey. Use the registered device's biometric sign-in.",
+        )
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
@@ -1024,7 +1029,13 @@ def admin_logout_confirm(payload: AdminLogoutConfirmRequest, request: Request) -
     if not _session_is_active(session, now) or session.get("deviceFingerprint") != payload.deviceFingerprint:
         raise HTTPException(status_code=403, detail="This device does not own the active admin session")
     session.update(isActive=False, expiresAt=now.isoformat(), endedAt=now.isoformat(), logoutIp=_request_ip(request))
-    _save_admin_session(session)
+    if storage.enabled():
+        storage.complete_admin_handover(session, user["id"])
+    else:
+        with DATA_LOCK:
+            _save_admin_session(session)
+            PASSKEYS[:] = [passkey for passkey in PASSKEYS if passkey.get("userId") != user["id"]]
+            write_data("passkeys.json", PASSKEYS)
     return {"success": True}
 
 
@@ -1146,7 +1157,7 @@ def passkey_registration_options(
         user_display_name=admin["name"],
         authenticator_selection=AuthenticatorSelectionCriteria(
             authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-            resident_key=ResidentKeyRequirement.PREFERRED,
+            resident_key=ResidentKeyRequirement.REQUIRED,
             user_verification=UserVerificationRequirement.REQUIRED,
         ),
         exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(item["id"])) for item in existing],

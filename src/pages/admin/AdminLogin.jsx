@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 
 export default function AdminLogin({ onSuccess }) {
-  const { loginAdmin, loginWithAdminPasskey, unlockAdmin } = useAuth();
+  const { loginAdmin, loginWithAdminPasskey } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -17,16 +17,6 @@ export default function AdminLogin({ onSuccess }) {
   const showMessage = (text, error = false) => {
     setMessage(text);
     setIsError(error);
-  };
-
-  const restoreSameDeviceSession = async () => {
-    const token = localStorage.getItem('rabi_admin_access_token');
-    if (!token) return false;
-    const { data } = await api.get('/admin/session/check');
-    if (!data.valid || !data.isOwnDevice) return false;
-    unlockAdmin(token);
-    onSuccess?.();
-    return true;
   };
 
   const handlePasswordLogin = async event => {
@@ -56,8 +46,7 @@ export default function AdminLogin({ onSuccess }) {
     showMessage('');
     try {
       if (!passkeySupported) {
-        if (await restoreSameDeviceSession()) return;
-        throw new Error('Face ID / Passkey is not available in this browser. Sign in with your email and password.');
+        throw new Error('This browser cannot use a device passkey. Try a browser with biometric or secure screen-lock support.');
       }
       const { data: ceremony } = await api.post('/auth/passkey/login/begin');
       const credential = await startAuthentication({ optionsJSON: ceremony.options });
@@ -69,9 +58,6 @@ export default function AdminLogin({ onSuccess }) {
       if (error.response?.headers?.['x-admin-session-active'] === 'true' || /already signed in on another phone/i.test(detail)) {
         setActiveOnAnotherDevice(true);
       }
-      try {
-        if (await restoreSameDeviceSession()) return;
-      } catch { /* Keep the passkey error for this device. */ }
       showMessage(detail, true);
     } finally {
       setBusy(false);
@@ -93,9 +79,15 @@ export default function AdminLogin({ onSuccess }) {
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-full border border-slate-300 text-xl font-bold">R</div>
           <h1 className="text-2xl font-bold tracking-tight">Rabis Chic Admin</h1>
           <p className="text-xs text-slate-500">Restricted access · administrators only</p>
+          <p className="text-xs leading-5 text-slate-600">Device passkeys verify with your phone or computer. Your fingerprint or Face ID stays on that device; the operating system may use its secure screen lock instead.</p>
         </header>
 
         <form onSubmit={handlePasswordLogin} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <button type="button" disabled={busy} onClick={handlePasskeyLogin} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-black px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+            <Fingerprint size={18} /> Sign In with Device Biometric
+          </button>
+          <p className="text-center text-[10px] leading-4 text-slate-500">Use the enrolled passkey on this device.</p>
+          <div className="flex items-center gap-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>First-time device setup</span><span className="h-px flex-1 bg-slate-200" /></div>
           <label className="block text-xs font-bold text-slate-700">Email
             <input type="email" required autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-black" />
           </label>
@@ -105,9 +97,7 @@ export default function AdminLogin({ onSuccess }) {
           <button type="submit" disabled={busy} className="min-h-12 w-full rounded-xl bg-black px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">
             {busy ? 'Signing in…' : 'Sign In'}
           </button>
-          <button type="button" disabled={busy} onClick={handlePasskeyLogin} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50">
-            <Fingerprint size={18} /> Login with Face ID / Passkey
-          </button>
+          <p className="text-center text-[10px] leading-4 text-slate-500">Admin password is for first-time device passkey setup. Once a passkey is registered, password sign-in is disabled.</p>
           {message && <p role={isError ? 'alert' : 'status'} className={`text-center text-xs font-semibold ${isError ? 'text-red-700' : 'text-slate-600'}`}>{message}</p>}
         </form>
 
