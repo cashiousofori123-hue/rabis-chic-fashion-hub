@@ -14,7 +14,7 @@ L.Icon.Default.mergeOptions({
 });
 
 const shopPoint        = [5.1036, -1.2825];
-const destinationPoint = [5.115,  -1.288];
+const defaultDestinationPoint = [5.115, -1.288];
 
 const bikeIcon = L.divIcon({
   className: 'courier-bike-marker',
@@ -23,11 +23,11 @@ const bikeIcon = L.divIcon({
   iconAnchor:[19, 19],
 });
 
-function FitRoute() {
+function FitRoute({ destination }) {
   const map = useMap();
   useEffect(() => {
-    map.fitBounds([shopPoint, destinationPoint], { padding: [36, 36] });
-  }, [map]);
+    map.fitBounds([shopPoint, destination], { padding: [36, 36] });
+  }, [map, destination]);
   return null;
 }
 
@@ -71,16 +71,58 @@ export default function TrackOrder({ order, orders, onOrderChange, canShare = fa
   const [gpsError,         setGpsError]        = useState('');
   const [riderPhoneNumber, setRiderPhoneNumber]= useState('');
   const [connectionMode,   setConnectionMode]  = useState('connecting'); // 'ws' | 'polling' | 'connecting'
+  const [destinationPoint, setDestinationPoint] = useState(defaultDestinationPoint);
+  const [destinationShared, setDestinationShared] = useState(false);
+  const [destinationError, setDestinationError] = useState('');
 
   const socketRef  = useRef(null);
   const watchRef   = useRef(null);
   const pollRef    = useRef(null);
 
+  useEffect(() => {
+    const hasDestination = Number.isFinite(Number(order?.destinationLat)) && Number.isFinite(Number(order?.destinationLng));
+    setDestinationPoint(hasDestination ? [Number(order.destinationLat), Number(order.destinationLng)] : defaultDestinationPoint);
+    setDestinationShared(Boolean(order?.destinationShared));
+    setDestinationError('');
+  }, [order?.id, order?.destinationLat, order?.destinationLng, order?.destinationShared]);
+
   // ── Merge incoming location update ──────────────────────────────────────────
   const applyUpdate = (data) => {
+    if (Number.isFinite(Number(data.destinationLat)) && Number.isFinite(Number(data.destinationLng))) {
+      setDestinationPoint([Number(data.destinationLat), Number(data.destinationLng)]);
+    }
+    if (typeof data.destinationShared === 'boolean') setDestinationShared(data.destinationShared);
     if (Number.isFinite(data.lat) && Number.isFinite(data.lng)) {
       setLocation(data);
     }
+  };
+
+  const shareDeliveryLocation = () => {
+    if (!navigator.geolocation) {
+      setDestinationError('This device does not support GPS location.');
+      return;
+    }
+    if (!order?.phone) {
+      setDestinationError('The phone number used for this order is required to share a location.');
+      return;
+    }
+    setDestinationError('Requesting your GPS location…');
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+      try {
+        const { data } = await api.post(`/orders/${encodeURIComponent(order.id)}/destination`, {
+          lat: coords.latitude,
+          lng: coords.longitude,
+          phone: order.phone,
+        });
+        setDestinationPoint([data.destinationLat, data.destinationLng]);
+        setDestinationShared(true);
+        setDestinationError('Your delivery location is shared. Distance, progress, and ETA now use your GPS.');
+      } catch (error) {
+        setDestinationError(error.response?.data?.detail || 'Could not save your delivery location. Please try again.');
+      }
+    }, (error) => {
+      setDestinationError(error.message || 'Location permission was denied.');
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
   };
 
   // ── Connect: WebSocket → 3 s timeout → polling ──────────────────────────────
@@ -216,7 +258,7 @@ export default function TrackOrder({ order, orders, onOrderChange, canShare = fa
   };
 
   const riderPoint = location ? [location.lat, location.lng] : null;
-  const progress   = Number(location?.progress || order?.progress || 0);
+  const progress   = Number(location?.progress ?? order?.progress ?? 0);
   const riderPhone = location?.phone;
 
   if (!order) {
@@ -292,7 +334,7 @@ export default function TrackOrder({ order, orders, onOrderChange, canShare = fa
       {/* Map — 400 px height */}
       <div className="relative h-[400px] overflow-hidden rounded-2xl border border-rose-100">
         <MapContainer center={shopPoint} zoom={14} className="h-full w-full" scrollWheelZoom>
-          <FitRoute />
+          <FitRoute destination={destinationPoint} />
           <TileLayer
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -334,6 +376,9 @@ export default function TrackOrder({ order, orders, onOrderChange, canShare = fa
           <p className="mt-2 text-right text-xs font-semibold text-slate-500">
             {progress}% complete
           </p>
+          {location?.distanceKm != null && <p className="mt-1 text-right text-[11px] text-slate-500">
+            {location.distanceKm < 1 ? `${Math.round(location.distanceKm * 1000)} m` : `${location.distanceKm.toFixed(1)} km`} away · ETA {location.eta || order.eta}
+          </p>}
           {riderPhone && (
             <div className="mt-4 flex gap-2">
               <a
@@ -384,6 +429,16 @@ export default function TrackOrder({ order, orders, onOrderChange, canShare = fa
               {sharing ? <Signal size={16} /> : <SignalZero size={16} />}
               {sharing ? 'Stop sharing GPS' : 'Share this device GPS'}
             </button>
+          )}
+
+          {!canShare && (
+            <div className="mt-5 rounded-xl border border-rose-100 bg-rose-50/60 p-4">
+              <p className="text-xs font-semibold text-slate-700">Share your delivery location to calculate how close the courier is and get a more accurate ETA.</p>
+              <button type="button" onClick={shareDeliveryLocation} disabled={destinationShared} className="mt-3 rounded-lg bg-rose-600 px-4 py-2.5 text-xs font-bold text-white disabled:bg-emerald-700">
+                {destinationShared ? 'Delivery location shared' : 'Share my delivery location'}
+              </button>
+              {destinationError && <p role="status" className="mt-2 text-[11px] text-slate-600">{destinationError}</p>}
+            </div>
           )}
 
           {canShare && (

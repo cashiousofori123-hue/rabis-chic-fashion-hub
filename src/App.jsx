@@ -12,6 +12,7 @@ const PendingUsers    = lazy(() => import('./pages/admin/PendingUsers'));
 const ContentManager  = lazy(() => import('./pages/admin/ContentManager'));
 const ProfilePage     = lazy(() => import('./pages/admin/Profile'));
 const SettingsPage    = lazy(() => import('./pages/admin/Settings'));
+const MessagesPage    = lazy(() => import('./pages/admin/Messages'));
 const AdminLogin      = lazy(() => import('./pages/admin/AdminLogin'));
 const AdminLayoutComp = lazy(() => import('./pages/admin/AdminLayout'));
 
@@ -357,11 +358,15 @@ export default function App() {
     };
     refreshOrders();
     const timer = window.setInterval(refreshOrders, 8000);
+    let messagesTimer;
     if (isAdminAuthenticated) {
       api.get('/users/pending').then(({ data }) => setPendingUsers(data)).catch(() => setPendingUsers([]));
       api.get('/users/riders').then(({ data }) => setRiders(data)).catch(() => setRiders([]));
+      const refreshMessages = () => api.get('/contact-messages').then(({ data }) => setMessages(data)).catch(() => {});
+      refreshMessages();
+      messagesTimer = window.setInterval(refreshMessages, 12000);
     }
-    return () => { active = false; window.clearInterval(timer); };
+    return () => { active = false; window.clearInterval(timer); if (messagesTimer) window.clearInterval(messagesTimer); };
   }, [isAdminAuthenticated, role]);
 
   useEffect(() => {
@@ -475,22 +480,24 @@ export default function App() {
     }
   };
 
-  const handleContactSubmit = (e) => {
+  const handleContactSubmit = async (e) => {
     e.preventDefault();
     if (!contactMsg.name || !contactMsg.phone || !contactMsg.note) {
       alert("Please complete all contact fields.");
       return;
     }
-    const newMsg = {
-      id: 'INQ-' + Date.now(),
-      sender: contactMsg.name,
-      phone: contactMsg.phone,
-      text: contactMsg.note,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setMessages([newMsg, ...messages]);
-    setContactSubmitted(true);
-    setContactMsg({ name: '', phone: '', note: '' });
+    try {
+      const { data: newMsg } = await api.post('/contact-messages', {
+        sender: contactMsg.name,
+        phone: contactMsg.phone,
+        text: contactMsg.note,
+      });
+      setMessages(current => [newMsg, ...current.filter(message => message.id !== newMsg.id)]);
+      setContactSubmitted(true);
+      setContactMsg({ name: '', phone: '', note: '' });
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Could not send your message. Please try again.');
+    }
   };
 
   const handlePriceChange = (id, newPrice) => {
@@ -718,6 +725,7 @@ export default function App() {
       '/admin/users': <PendingUsers />,
       '/admin/content': <ContentManager />,
       '/admin/profile': <ProfilePage />,
+      '/admin/messages': <MessagesPage />,
       '/admin/settings': <SettingsPage adminContact={adminContact} setAdminContact={setAdminContact} transferEmail={transferEmail} setTransferEmail={setTransferEmail} />,
     };
     return <>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Mail, Settings, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const GROUPS = [
@@ -9,6 +9,7 @@ const GROUPS = [
       ['/admin/overview', 'Overview', 'Stats, revenue', BarChart3],
       ['/admin/products', 'Products', 'Add, edit, delete', Box],
       ['/admin/orders', 'Orders', 'Manage orders', CheckCircle2],
+      ['/admin/messages', 'Messages', 'Customer notes & inquiries', Mail],
       ['/admin/users', 'Pending Users', 'Approve accounts', Users],
       ['/admin/content', 'Content Manager', 'Hero, prices, images', FileImage],
     ],

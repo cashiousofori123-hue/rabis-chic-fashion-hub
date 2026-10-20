@@ -140,6 +140,8 @@ PASSKEYS: list[dict[str, Any]] = read_data("passkeys.json", [])
 
 # ── In-memory live GPS locations (Vercel-compatible) ──────────────────────────
 live_locations: dict[str, dict[str, Any]] = {}
+SHOP_COORDS = (5.1036, -1.2825)
+DEFAULT_DESTINATION_COORDS = (5.115, -1.288)
 
 # ── Default site content ──────────────────────────────────────────────────────
 DEFAULT_SITE_CONTENT: dict[str, Any] = {
@@ -196,6 +198,12 @@ class OrderRequest(BaseModel):
     quantity: int = Field(ge=1, le=10)
     deliveryOption: str = Field(pattern="^(standard|express|outside)$")
     paymentMethod: str = Field(default="MTN MoMo", max_length=30)
+
+
+class ContactMessageRequest(BaseModel):
+    sender: str = Field(min_length=1, max_length=100)
+    phone: str = Field(min_length=8, max_length=20)
+    text: str = Field(min_length=1, max_length=2000)
 
 
 def _send_order_email(order: dict[str, Any], recipient: str, *, admin_notice: bool = False) -> bool:
@@ -258,6 +266,107 @@ def _send_order_sms(order: dict[str, Any]) -> bool:
         return True
 
 
+def _admin_notification_email() -> str:
+    try:
+        admins = storage.list_users("admin") if storage.enabled() else [user for user in USERS if user.get("role") == "admin"]
+        if admins:
+            return str(admins[0].get("email", "")).strip().lower()
+    except Exception:
+        pass
+    return ADMIN_EMAIL
+
+
+def _get_contact_messages() -> list[dict[str, Any]]:
+    if storage.enabled():
+        return storage.get_store_setting("contact_messages") or []
+    return read_data("contact_messages.json", [])
+
+
+def _save_contact_messages(messages: list[dict[str, Any]]) -> None:
+    if storage.enabled():
+        storage.set_store_setting("contact_messages", messages)
+    else:
+        write_data("contact_messages.json", messages)
+
+
+def _send_contact_message_email(message_data: dict[str, Any]) -> bool:
+    recipient = _admin_notification_email()
+    host = os.getenv("SMTP_HOST", "").strip()
+    username = os.getenv("SMTP_USER", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "")
+    sender_address = os.getenv("SMTP_FROM", username).strip()
+    if not all((recipient, host, username, password, sender_address)):
+        return False
+
+    sender_name = escape(str(message_data.get("sender", "Customer")))
+    sender_phone = escape(str(message_data.get("phone", "")))
+    note = escape(str(message_data.get("text", "")))
+    subject = f"New customer note from {message_data.get('sender', 'Rabi’s Chic customer')}"
+    plain = f"New customer note\nFrom: {message_data.get('sender')}\nPhone: {message_data.get('phone')}\n\n{message_data.get('text')}\n\nOpen the admin dashboard: https://rabis-chic-fashion-hub.vercel.app/rabis-admin/messages"
+    html = f"<h2>New customer note</h2><p><b>From:</b> {sender_name}<br><b>Phone:</b> {sender_phone}</p><p>{note}</p><p><a href=\"https://rabis-chic-fashion-hub.vercel.app/rabis-admin/messages\">Open customer messages</a></p>"
+    email_message = EmailMessage()
+    email_message["Subject"] = subject
+    email_message["From"] = sender_address
+    email_message["To"] = recipient
+    email_message.set_content(plain)
+    email_message.add_alternative(html, subtype="html")
+    with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=8) as smtp:
+        smtp.starttls()
+        smtp.login(username, password)
+        smtp.send_message(email_message)
+    return True
+
+
+def _deliver_contact_message_email(message_id: str) -> None:
+    with DATA_LOCK:
+        messages = _get_contact_messages()
+    message_data = next((item for item in messages if item.get("id") == message_id), None)
+    if not message_data:
+        return
+    try:
+        email_status = "sent" if _send_contact_message_email(message_data) else "not_configured"
+    except (OSError, smtplib.SMTPException, ValueError):
+        email_status = "failed"
+    with DATA_LOCK:
+        latest_messages = _get_contact_messages()
+        latest_message = next((item for item in latest_messages if item.get("id") == message_id), None)
+        if latest_message:
+            latest_message["emailStatus"] = email_status
+            _save_contact_messages(latest_messages)
+
+
+def _distance_km(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
+    radians = math.pi / 180
+    delta_lat = (lat_b - lat_a) * radians
+    delta_lng = (lng_b - lng_a) * radians
+    return 6371 * 2 * math.asin(math.sqrt(
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat_a * radians) * math.cos(lat_b * radians) * math.sin(delta_lng / 2) ** 2
+    ))
+
+
+def _delivery_metrics(lat: float, lng: float, destination_lat: float, destination_lng: float) -> dict[str, Any]:
+    remaining_km = _distance_km(lat, lng, destination_lat, destination_lng)
+    route_km = _distance_km(*SHOP_COORDS, destination_lat, destination_lng)
+    delivered = remaining_km <= 0.05
+    progress = 100 if delivered else 0 if route_km <= 0.05 else int(max(0, min(99, (1 - remaining_km / route_km) * 100)))
+    eta = "Arriving now" if delivered else f"{max(1, math.ceil(remaining_km / 20 * 60))} mins"
+    return {"progress": progress, "eta": eta, "status": "Delivered" if delivered else "On The Way", "distanceKm": round(remaining_km, 2)}
+
+
+def _order_delivery_metrics(lat: float, lng: float, order: dict[str, Any]) -> dict[str, Any]:
+    destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
+    destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
+    metrics = _delivery_metrics(lat, lng, destination_lat, destination_lng)
+    if not order.get("destinationShared"):
+        metrics["progress"] = min(99, metrics["progress"])
+        metrics["eta"] = "Approx. " + ("1 min" if metrics["eta"] == "Arriving now" else metrics["eta"])
+        metrics["status"] = "On The Way"
+    elif order.get("status") == "Delivered":
+        metrics.update(progress=100, eta="Arriving now", status="Delivered")
+    return metrics
+
+
 def _deliver_order_notifications(order_id: str, customer_email: str) -> None:
     if storage.enabled():
         order = storage.get_order(order_id)
@@ -269,7 +378,7 @@ def _deliver_order_notifications(order_id: str, customer_email: str) -> None:
 
     status = {"adminEmail": "not_configured", "customerEmail": "not_configured", "sms": "not_configured"}
     for key, recipient, is_admin in (
-        ("adminEmail", ADMIN_EMAIL, True),
+        ("adminEmail", _admin_notification_email(), True),
         ("customerEmail", customer_email, False),
     ):
         if not recipient:
@@ -297,6 +406,12 @@ class LocationUpdate(BaseModel):
     lng: float = Field(ge=-180, le=180)
     rider: str = Field(default="Courier rider", max_length=100)
     phone: str = Field(default="", max_length=20)
+
+
+class CustomerDestinationUpdate(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    phone: str = Field(min_length=8, max_length=20)
 
 
 class TransferRequest(BaseModel):
@@ -863,6 +978,31 @@ def transfer_admin(
     return {"message": f"Admin transferred to {email}. Please log in again."}
 
 
+@app.post("/contact-messages")
+def create_contact_message(request: ContactMessageRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    message_data = {
+        "id": f"INQ-{secrets.token_hex(6).upper()}",
+        "sender": request.sender.strip(),
+        "phone": request.phone.strip(),
+        "text": request.text.strip(),
+        "time": now.strftime("%H:%M UTC"),
+        "createdAt": now.isoformat(),
+        "emailStatus": "queued",
+    }
+    with DATA_LOCK:
+        messages = _get_contact_messages()
+        messages = [message_data, *messages][:300]
+        _save_contact_messages(messages)
+    background_tasks.add_task(_deliver_contact_message_email, message_data["id"])
+    return message_data
+
+
+@app.get("/contact-messages")
+def list_contact_messages(_: dict[str, Any] = Depends(get_current_admin)) -> list[dict[str, Any]]:
+    return _get_contact_messages()
+
+
 @app.post("/orders")
 def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     product = storage.get_product(request.productId) if storage.enabled() else next((entry for entry in PRODUCTS if entry["id"] == request.productId), None)
@@ -890,6 +1030,7 @@ def create_order(request: OrderRequest, background_tasks: BackgroundTasks) -> di
         "riderUserId": None,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "notificationStatus": {"adminEmail": "queued", "customerEmail": "queued", "sms": "queued"},
+        "destinationShared": False,
     }
     with DATA_LOCK:
         if storage.enabled():
@@ -969,32 +1110,27 @@ async def update_rider_location(
         raise HTTPException(status_code=404, detail="Order not found")
     if operator["role"] == "rider" and order.get("riderUserId") != operator["id"]:
         raise HTTPException(status_code=403, detail="This delivery is not assigned to your courier account")
-    start_lat, start_lng = 5.1036, -1.2825
-    end_lat, end_lng = 5.115, -1.288
-    route_lat = end_lat - start_lat
-    route_lng = end_lng - start_lng
-    route_length_squared = route_lat**2 + route_lng**2
-    progress = max(0.0, min(1.0, ((location.lat - start_lat) * route_lat + (location.lng - start_lng) * route_lng) / route_length_squared))
-    radians = math.pi / 180
-    delta_lat = (end_lat - location.lat) * radians
-    delta_lng = (end_lng - location.lng) * radians
-    distance = 6371 * 2 * math.asin(math.sqrt(
-        math.sin(delta_lat / 2) ** 2
-        + math.cos(location.lat * radians) * math.cos(end_lat * radians) * math.sin(delta_lng / 2) ** 2
-    ))
-    delivered = distance <= 0.05
+    destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
+    destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
+    metrics = _order_delivery_metrics(location.lat, location.lng, order)
+    delivered = metrics["status"] == "Delivered"
     point = {
         **location.model_dump(),
         "order_id": order_id,
-        "progress": 100 if delivered else int(progress * 100),
-        "eta": "Arriving now" if delivered else f"{max(1, math.ceil(distance / 20 * 60))} mins",
-        "status": "Delivered" if delivered else "On The Way",
+        **metrics,
+        "progress": 100 if delivered else metrics["progress"],
+        "eta": "Arriving now" if delivered else metrics["eta"],
+        "status": "Delivered" if delivered else metrics["status"],
+        "destinationLat": destination_lat,
+        "destinationLng": destination_lng,
+        "destinationShared": bool(order.get("destinationShared")),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if storage.enabled():
         storage.save_location(order_id, point)
     else:
         RIDER_LOCATIONS[order_id] = point
+    live_locations[order_id] = point
     order.update(status=point["status"], progress=point["progress"], eta=point["eta"])
     if storage.enabled():
         storage.save_order(order)
@@ -1009,6 +1145,57 @@ async def update_rider_location(
     return point
 
 
+@app.post("/orders/{order_id}/destination")
+async def update_customer_destination(order_id: str, location: CustomerDestinationUpdate) -> dict[str, Any]:
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    supplied_phone = "".join(character for character in location.phone if character.isdigit())
+    order_phone = "".join(character for character in str(order.get("phone", "")) if character.isdigit())
+    if not supplied_phone or supplied_phone != order_phone:
+        raise HTTPException(status_code=403, detail="Confirm the phone number used for this order")
+
+    was_destination_shared = bool(order.get("destinationShared"))
+    order.update(destinationLat=location.lat, destinationLng=location.lng, destinationShared=True)
+    point = storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id)
+    if not point:
+        point = live_locations.get(order_id)
+    response = {"destinationLat": location.lat, "destinationLng": location.lng, "destinationShared": True}
+    if point and isinstance(point.get("lat"), (int, float)) and isinstance(point.get("lng"), (int, float)):
+        metrics = _delivery_metrics(float(point["lat"]), float(point["lng"]), location.lat, location.lng)
+        delivered = metrics["status"] == "Delivered" or (was_destination_shared and order.get("status") == "Delivered")
+        point = {
+            **point,
+            **metrics,
+            "progress": 100 if delivered else metrics["progress"],
+            "eta": "Arriving now" if delivered else metrics["eta"],
+            "status": "Delivered" if delivered else metrics["status"],
+            "destinationLat": location.lat,
+            "destinationLng": location.lng,
+            "destinationShared": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if storage.enabled():
+            storage.save_location(order_id, point)
+        else:
+            RIDER_LOCATIONS[order_id] = point
+        live_locations[order_id] = point
+        if delivered or order.get("status") != "Delivered" or not was_destination_shared:
+            order.update(status=point["status"], progress=point["progress"], eta=point["eta"])
+        response.update({key: point[key] for key in ("progress", "eta", "status", "distanceKm")})
+        for socket in list(CONNECTED_TRACKERS.get(order_id, set())):
+            try:
+                await socket.send_json({**point, "customer": order["customer"], "hostel": order["hostel"], "room": order["room"]})
+            except WebSocketDisconnect:
+                CONNECTED_TRACKERS[order_id].discard(socket)
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        ORDERS[order_id] = order
+        write_data("orders.json", ORDERS)
+    return response
+
+
 # ── Live-location convenience endpoint (simple in-memory, Vercel-compatible) ──
 @app.post("/orders/{order_id}/update-location")
 def simple_update_location(
@@ -1016,15 +1203,37 @@ def simple_update_location(
     location: LocationUpdate,
 ) -> dict[str, Any]:
     """Rider app posts lat/lng here; polling customers read it back."""
+    order = storage.get_order(order_id) if storage.enabled() else ORDERS.get(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    destination_lat = float(order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]))
+    destination_lng = float(order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]))
+    metrics = _order_delivery_metrics(location.lat, location.lng, order)
+    delivered = metrics["status"] == "Delivered"
     point = {
         "order_id": order_id,
         "lat": location.lat,
         "lng": location.lng,
         "rider": location.rider,
         "phone": location.phone,
+        **metrics,
+        "progress": 100 if delivered else metrics["progress"],
+        "eta": "Arriving now" if delivered else metrics["eta"],
+        "status": "Delivered" if delivered else metrics["status"],
+        "destinationLat": destination_lat,
+        "destinationLng": destination_lng,
+        "destinationShared": bool(order.get("destinationShared")),
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
     live_locations[order_id] = point
+    if storage.enabled():
+        storage.save_location(order_id, point)
+    order.update(status=point["status"], progress=point["progress"], eta=point["eta"])
+    if storage.enabled():
+        storage.save_order(order)
+    else:
+        ORDERS[order_id] = order
+        write_data("orders.json", ORDERS)
     return point
 
 
@@ -1037,7 +1246,22 @@ def live_location(order_id: str) -> dict[str, Any]:
     point = live_locations.get(order_id) or (
         storage.get_location(order_id) if storage.enabled() else RIDER_LOCATIONS.get(order_id)
     )
-    return point or {"status": "Waiting for rider GPS", "order_id": order_id}
+    if point:
+        return {
+            **point,
+            "destinationLat": order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]),
+            "destinationLng": order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]),
+            "destinationShared": bool(order.get("destinationShared")),
+        }
+    return {
+        "status": order.get("status", "Waiting for rider GPS"),
+        "progress": order.get("progress", 0),
+        "eta": order.get("eta", "Awaiting GPS"),
+        "destinationLat": order.get("destinationLat", DEFAULT_DESTINATION_COORDS[0]),
+        "destinationLng": order.get("destinationLng", DEFAULT_DESTINATION_COORDS[1]),
+        "destinationShared": bool(order.get("destinationShared")),
+        "order_id": order_id,
+    }
 
 
 # ── Site content endpoints ────────────────────────────────────────────────────
@@ -1091,6 +1315,9 @@ async def websocket_track(websocket: WebSocket, order_id: str) -> None:
                 "eta": (point or {}).get("eta", (order or {}).get("eta")),
                 "hostel": (order or {}).get("hostel"),
                 "room": (order or {}).get("room"),
+                "destinationLat": (order or {}).get("destinationLat", DEFAULT_DESTINATION_COORDS[0]),
+                "destinationLng": (order or {}).get("destinationLng", DEFAULT_DESTINATION_COORDS[1]),
+                "destinationShared": bool((order or {}).get("destinationShared")),
             })
             await asyncio.sleep(3)
     except WebSocketDisconnect:
