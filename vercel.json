@@ -31,6 +31,10 @@
       "dest": "/index.html"
     },
     {
+      "src": "^/(search|wishlist|faq|login|signup|register|track|orders|shop|about|contact)/?$",
+      "dest": "/index.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/dist/$1"
     }

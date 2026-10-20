@@ -1,9 +1,15 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { Fingerprint, LogOut, ShieldCheck } from 'lucide-react';
+import { Fingerprint, LogOut, ShieldCheck, Menu, X, Heart, ShoppingBag, Search as SearchIcon, UserRound, ChevronDown, HelpCircle } from 'lucide-react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import api from './api';
 import { useAuth } from './context/AuthContext';
 import { telLink, whatsappLink } from './utils/contactLinks';
+import Onupa from './components/Onupa';
+import WhatsAppButton from './components/WhatsAppButton';
+const SearchPage = lazy(() => import('./pages/Search'));
+const WishlistPage = lazy(() => import('./pages/Wishlist'));
+const FAQPage = lazy(() => import('./pages/FAQ'));
+const AccountPage = lazy(() => import('./pages/Account'));
 const TrackOrder      = lazy(() => import('./components/TrackOrder'));
 const Overview        = lazy(() => import('./pages/admin/Overview'));
 const Products        = lazy(() => import('./pages/admin/Products'));
@@ -114,6 +120,9 @@ export default function App() {
   }, [routePath, authReady, user, role]);
 
   const [activeView, setActiveView] = useState('store'); // 'store', 'tracker', 'lookup', 'about', 'contact', 'admin'
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
 
   const [adminTab, setAdminTab] = useState('overview'); // 'overview', 'approvals', 'messages', 'catalog', 'contact', 'security'
   const isAdminAccount = authReady && role === 'admin';
@@ -138,11 +147,17 @@ export default function App() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedProductModal, setSelectedProductModal] = useState(null);
+  const [showSizeGuide, setShowSizeGuide] = useState(false);
+  const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [newsletterDone, setNewsletterDone] = useState(false);
 
   // Products State
   const [products, setProducts] = useState(() => {
     const saved = localStorage.getItem('rabi_products');
     return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
+  });
+  const [wishlist, setWishlist] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('wishlist') || '[]'); } catch { return []; }
   });
 
   // New Product Form State
@@ -218,7 +233,8 @@ export default function App() {
     customItemName: '',
     quantity: 1,
     deliveryOption: 'standard',
-    paymentMethod: 'MTN MoMo'
+    paymentMethod: 'MTN MoMo',
+    couponCode: ''
   });
 
   const [orderStage, setOrderStage] = useState('idle');
@@ -228,8 +244,17 @@ export default function App() {
 
   // Local Storage Sync
   useEffect(() => {
-    localStorage.setItem('rabi_products', JSON.stringify(products));
+    const cacheSafeProducts = products.map(product => ({
+      ...product,
+      mainImage: String(product.mainImage || '').startsWith('data:') ? '' : product.mainImage,
+      images: (product.images || []).filter(image => !String(image).startsWith('data:')),
+    }));
+    try { localStorage.setItem('rabi_products', JSON.stringify(cacheSafeProducts)); } catch { /* API data is fetched again on reload. */ }
   }, [products]);
+
+  useEffect(() => {
+    try { localStorage.setItem('wishlist', JSON.stringify(wishlist)); } catch { /* The wishlist is small and can be rebuilt. */ }
+  }, [wishlist]);
 
   useEffect(() => {
     localStorage.setItem('rabi_slides', JSON.stringify(slides));
@@ -245,9 +270,10 @@ export default function App() {
 
   const currentOrderProduct = products.find(p => p.id === Number(checkoutData.selectedProductId)) || products[0];
   const orderSubtotal = effectivePrice(currentOrderProduct) * checkoutData.quantity;
+  const orderDiscount = checkoutData.couponCode.trim().toUpperCase() === 'CHIC10' ? Math.round(orderSubtotal * 0.1 * 100) / 100 : 0;
   const deliveryFees = { standard: 30, express: 60, outside: 80 };
   const orderDeliveryFee = deliveryFees[checkoutData.deliveryOption];
-  const orderTotal = orderSubtotal + orderDeliveryFee;
+  const orderTotal = orderSubtotal - orderDiscount + orderDeliveryFee;
 
   useEffect(() => {
     api.get('/store-contact')
@@ -489,6 +515,7 @@ export default function App() {
       quantity: checkoutData.quantity,
       deliveryOption: checkoutData.deliveryOption,
       paymentMethod: checkoutData.paymentMethod,
+      couponCode: checkoutData.couponCode,
       });
       setOrders([newOrder, ...orders]);
       setSelectedOrderForTracking(newOrder);
@@ -744,6 +771,30 @@ export default function App() {
   const adminPhoneHref = telLink(adminContact.phone);
   const adminWhatsAppHref = whatsappLink(adminContact.whatsapp);
   const adminWhatsAppMessageHref = whatsappLink(adminContact.whatsapp, 'Hello Rabi, I need clarification on my UCC hostel order.');
+  const navigateTo = (path) => {
+    window.history.pushState({}, '', path);
+    setRoutePath(path);
+    setMobileMenuOpen(false);
+    setAccountMenuOpen(false);
+    setCartOpen(false);
+  };
+  const toggleWishlist = (productId) => setWishlist(current => current.some(id => String(id) === String(productId))
+    ? current.filter(id => String(id) !== String(productId))
+    : [...current, productId]);
+  const choosePublicProduct = (product) => { setSelectedProductModal(product); navigateTo('/'); };
+
+  useEffect(() => {
+    if (routePath === '/register') {
+      window.history.replaceState({}, '', '/signup');
+      setRoutePath('/signup');
+      return;
+    }
+    if (routePath === '/' || routePath === '/shop') setActiveView('store');
+    else if (routePath === '/track') setActiveView(activeTrackingOrder ? 'tracker' : 'lookup');
+    else if (routePath === '/orders') setActiveView('lookup');
+    else if (routePath === '/about') setActiveView('about');
+    else if (routePath === '/contact') setActiveView('contact');
+  }, [routePath, Boolean(activeTrackingOrder)]);
 
   if (routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
     return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
@@ -789,6 +840,12 @@ export default function App() {
     </>;
   }
 
+  if (routePath === '/search') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><SearchPage onBack={() => navigateTo('/')} onChoose={choosePublicProduct} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
+  if (routePath === '/wishlist') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><WishlistPage wishlist={wishlist} setWishlist={setWishlist} onBack={() => navigateTo('/')} onChoose={choosePublicProduct} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
+  if (routePath === '/faq') return <><Suspense fallback={<div className="min-h-screen bg-white" />}><FAQPage onBack={() => navigateTo('/')} /></Suspense><Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} /><WhatsAppButton href={adminWhatsAppHref} /></>;
+  if (routePath === '/login' || routePath === '/signup') return <Suspense fallback={<div className="min-h-screen bg-white" />}><AccountPage mode={routePath === '/signup' ? 'signup' : 'login'} onBack={() => navigateTo('/')} onNavigate={navigateTo} /></Suspense>;
+  if (routePath === '/track' && activeTrackingOrder) return <Suspense fallback={<div className="h-screen bg-slate-100" />}><TrackOrder order={activeTrackingOrder} orders={orders} onOrderChange={setSelectedOrderForTracking} canShare={role === 'admin' || role === 'rider'} /></Suspense>;
+
   return (
     <div className="min-h-screen bg-rose-50/40 text-slate-800 font-sans overflow-x-hidden">
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
@@ -818,6 +875,7 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="h-64 rounded-2xl overflow-hidden bg-rose-50 shadow-inner">
                 <img src={optimizeProductImage(selectedProductModal.mainImage)} loading="lazy" decoding="async" className="w-full h-full object-cover" alt={selectedProductModal.name} />
+                <button type="button" onClick={() => setShowSizeGuide(true)} className="mt-3 min-h-11 w-full rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700">View Size Guide</button>
               </div>
               <div className="flex flex-col justify-between space-y-3">
                 <div>
@@ -826,6 +884,7 @@ export default function App() {
                   </span>
                   <h3 className="text-xl font-serif font-bold text-slate-900 mt-2">{selectedProductModal.name}</h3>
                   <p className="text-xs text-slate-600 mt-2 leading-relaxed">{selectedProductModal.description}</p>
+                  <div className="mt-4 rounded-2xl bg-amber-50 p-3"><p className="text-xs font-bold text-slate-800">★★★★★ <span className="ml-1 text-slate-600">Customer favourite</span></p><p className="mt-1 text-[11px] leading-5 text-slate-600">Customers love the style and value. Ask us about fit before ordering.</p></div>
                 </div>
 
                 <div className="space-y-3 pt-3 border-t border-rose-100">
@@ -852,6 +911,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showSizeGuide && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[110] grid place-items-center bg-black/50 p-4" onMouseDown={event => { if (event.target === event.currentTarget) setShowSizeGuide(false); }}><section className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"><div className="flex items-center"><h2 className="flex-1 text-lg font-bold">Size Guide</h2><button onClick={() => setShowSizeGuide(false)} aria-label="Close size guide" className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X size={18} /></button></div><p className="mt-2 text-xs leading-5 text-slate-600">Sizes vary by product. Measure around the fullest part of your bust and hips, and around your natural waist. Contact Rabi with your measurements for a fit recommendation.</p><div className="mt-4 grid grid-cols-4 gap-1 text-center text-[10px]">{[['Size','Bust','Waist','Hip'],['S','84–88 cm','66–70 cm','90–94 cm'],['M','89–94 cm','71–76 cm','95–100 cm'],['L','95–102 cm','77–84 cm','101–108 cm']].flatMap((row,index) => row.map((cell,column) => <span key={`${index}-${column}`} className={`rounded-lg p-2 ${index === 0 ? 'bg-slate-100 font-bold' : 'bg-white text-slate-700'}`}>{cell}</span>))}</div><p className="mt-3 text-[10px] text-slate-400">Approximate guide only; item measurements may vary.</p></section></div>}
 
       {/* CALL ADMIN MODAL SELECTOR */}
       {showCallModal && (
@@ -952,40 +1013,53 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 md:gap-2 order-2 sm:order-3 overflow-x-auto max-w-full pb-1 sm:pb-0">
+            <button onClick={() => navigateTo('/')} className="hidden px-2.5 py-2 text-xs font-bold text-slate-700 hover:text-rose-600 lg:inline-flex">Home</button>
             <button 
-              onClick={() => setActiveView('store')}
+              onClick={() => navigateTo('/shop')}
               className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'store' ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-rose-50 text-rose-700 hover:bg-rose-100'}`}
             >
               <i className="fa-solid fa-bag-shopping"></i> Store
             </button>
 
             <button 
-              onClick={() => setActiveView('tracker')}
+              onClick={() => navigateTo('/track')}
               className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'tracker' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
             >
-              <i className="fa-solid fa-map-location-dot"></i> Live Map
+              <i className="fa-solid fa-map-location-dot"></i> Track Order
             </button>
 
             <button 
-              onClick={() => setActiveView('lookup')}
+              onClick={() => navigateTo('/orders')}
               className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'lookup' ? 'bg-amber-600 text-white shadow-md shadow-amber-200' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
             >
               <i className="fa-solid fa-magnifying-glass-chart"></i> Lookup
             </button>
 
             <button 
-              onClick={() => setActiveView('about')}
+              onClick={() => navigateTo('/about')}
               className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'about' ? 'bg-pink-600 text-white shadow-md' : 'bg-pink-50 text-pink-700 hover:bg-pink-100'}`}
             >
               <i className="fa-solid fa-heart"></i> About
             </button>
 
             <button 
-              onClick={() => setActiveView('contact')}
+              onClick={() => navigateTo('/contact')}
               className={`px-2.5 md:px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 whitespace-nowrap ${activeView === 'contact' ? 'bg-purple-600 text-white shadow-md' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}
             >
               <i className="fa-solid fa-address-book"></i> Contact
             </button>
+            <button onClick={() => navigateTo('/faq')} className="hidden px-2.5 md:inline-flex py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"><HelpCircle size={14} /> FAQ</button>
+
+            <button onClick={() => navigateTo('/search')} aria-label="Open search" title="Search" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-rose-50"><SearchIcon size={18} /></button>
+            <button onClick={() => navigateTo('/wishlist')} aria-label="Open wishlist" title="Wishlist" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-rose-600 hover:bg-rose-50"><Heart size={18} />{wishlist.length > 0 && <span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-rose-600 px-1 text-[9px] font-bold text-white">{wishlist.length}</span>}</button>
+            <button onClick={() => { navigateTo('/shop'); window.setTimeout(() => document.getElementById('order-checkout')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120); }} aria-label="Go to order checkout" title="Cart / checkout" className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-700 hover:bg-slate-100"><ShoppingBag size={18} /><span className="absolute right-0 top-0 grid h-4 min-w-4 place-items-center rounded-full bg-slate-900 px-1 text-[9px] font-bold text-white">{checkoutData.quantity || 0}</span></button>
+
+            {!user ? <div className="hidden items-center gap-1 md:flex"><button onClick={() => navigateTo('/login')} className="rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">Login</button><button onClick={() => navigateTo('/signup')} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-bold text-white">Sign Up</button></div>
+              : <div className="relative"><button onClick={() => setAccountMenuOpen(value => !value)} aria-label="Account menu" className="flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 text-xs font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full bg-rose-100 text-rose-700"><UserRound size={16} /></span><ChevronDown size={14} /></button>
+                {accountMenuOpen && <div className="absolute right-0 top-12 z-[90] w-52 rounded-xl border border-slate-100 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-[11px] text-slate-500">{user.email}</p><button onClick={() => navigateTo('/orders')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">My Orders</button><button onClick={() => navigateTo('/wishlist')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold hover:bg-slate-50">Wishlist</button>{isAdminAccount && <button onClick={() => navigateTo('/admin')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50">Admin Portal</button>}<button onClick={() => { logout(); navigateTo('/login'); }} className="w-full rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">Log Out</button></div>}
+              </div>}
+
+            <button onClick={() => setMobileMenuOpen(value => !value)} aria-label="Open navigation" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 md:hidden">{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
 
             {/* Only an authenticated administrator sees the dashboard link. */}
             {isAdminAccount && (
@@ -996,13 +1070,13 @@ export default function App() {
                 <i className="fa-solid fa-user-shield"></i> Admin Portal
               </button>
             )}
-            {user && role !== 'admin' && (
-              <button onClick={() => { logout(); setActiveView('store'); }} className="px-2.5 py-2 text-xs font-bold text-slate-600 flex items-center gap-1" title="Log out">
-                <LogOut size={15} /> Logout
-              </button>
-            )}
           </div>
         </div>
+        {mobileMenuOpen && <nav className="border-t border-slate-100 bg-white px-4 py-3 md:hidden"><div className="grid grid-cols-2 gap-2">
+          {[['Home','/'],['Store','/shop'],['Track Order','/track'],['My Orders','/orders'],['Wishlist','/wishlist'],['Search','/search'],['About','/about'],['Contact','/contact'],['FAQ','/faq']].map(([label,path]) => <button key={path + label} onClick={() => navigateTo(path)} className="min-h-11 rounded-xl bg-slate-50 px-3 text-left text-sm font-semibold text-slate-700">{label}</button>)}
+          {!user ? <><button onClick={() => navigateTo('/login')} className="min-h-11 rounded-xl border border-slate-200 px-3 text-left text-sm font-bold">Login</button><button onClick={() => navigateTo('/signup')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Sign Up</button></> : <button onClick={() => { logout(); navigateTo('/login'); }} className="min-h-11 rounded-xl bg-red-50 px-3 text-left text-sm font-bold text-red-700">Log Out</button>}
+          {isAdminAccount && <button onClick={() => navigateTo('/admin')} className="min-h-11 rounded-xl bg-slate-950 px-3 text-left text-sm font-bold text-white">Admin Portal</button>}
+        </div></nav>}
       </header>
 
       {/* STORE VIEW */}
@@ -1085,8 +1159,11 @@ export default function App() {
               >
                 <div>
                   <div className="relative h-48 sm:h-56 md:h-60 rounded-2xl overflow-hidden mb-4 bg-rose-50">
-                    <img src={optimizeProductImage(product.mainImage)} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" alt={product.name} />
-                    <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-rose-600">
+                    <img src={optimizeProductImage(product.mainImage)} loading="lazy" decoding="async" className={`w-full h-full object-cover group-hover:scale-105 transition duration-500 ${['out_of_stock','sold'].includes(product.status) ? 'grayscale opacity-50' : ''}`} alt={product.name} />
+                    <button type="button" aria-label={wishlist.some(id => String(id) === String(product.id)) ? 'Remove from wishlist' : 'Add to wishlist'} onClick={(event) => { event.stopPropagation(); toggleWishlist(product.id); }} className="absolute left-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-white/95 text-rose-600 shadow"><Heart size={18} fill={wishlist.some(id => String(id) === String(product.id)) ? 'currentColor' : 'none'} /></button>
+                    {product.status && product.status !== 'in_stock' && <span className={`absolute left-14 top-3 rounded-full px-2.5 py-1 text-[10px] font-bold ${product.status === 'just_sold' ? 'bg-orange-100 text-orange-800' : product.status === 'out_of_stock' ? 'bg-slate-200 text-slate-700' : 'bg-red-100 text-red-800'}`}>{product.status === 'just_sold' ? 'Just Sold' : product.status === 'out_of_stock' ? 'Out of Stock' : 'Sold Out'}</span>}
+                    {['out_of_stock','sold'].includes(product.status) && <span className="absolute inset-0 flex items-center justify-center bg-slate-900/20 text-sm font-black uppercase tracking-widest text-white">Unavailable</span>}
+                    <span className="absolute right-3 top-3 bg-white/90 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold text-rose-600">
                       ★ {product.rating}
                     </span>
                   </div>
@@ -1104,14 +1181,15 @@ export default function App() {
                     {Number(product.discount) > 0 && <div className="text-[10px] text-slate-500"><span className="line-through">GH₵ {product.price}</span> · {product.discount}% off</div>}
                   </div>
                   <button 
+                    disabled={['out_of_stock','sold'].includes(product.status)}
                     onClick={(e) => {
                       e.stopPropagation();
                       setCheckoutData({ ...checkoutData, selectedProductId: product.id, customItemName: product.name });
                       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
                     }}
-                    className="bg-rose-500 hover:bg-rose-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-rose-200"
+                    className="bg-rose-500 hover:bg-rose-600 disabled:cursor-not-allowed disabled:bg-slate-400 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-rose-200"
                   >
-                    Order Now
+                    {['out_of_stock','sold'].includes(product.status) ? 'Unavailable' : 'Order Now'}
                   </button>
                 </div>
               </div>
@@ -1119,7 +1197,7 @@ export default function App() {
           </div>
 
           {/* ORDER & INVOICE FORM */}
-          <div className="bg-white p-5 md:p-8 rounded-3xl border border-rose-100 shadow-sm max-w-4xl mx-auto space-y-6">
+          <div id="order-checkout" className="scroll-mt-24 bg-white p-5 md:p-8 rounded-3xl border border-rose-100 shadow-sm max-w-4xl mx-auto space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900">Place UCC Hostel Order & Calculate Invoice</h3>
@@ -1288,6 +1366,8 @@ export default function App() {
                         <span>Delivery ({checkoutData.deliveryOption}):</span>
                         <span className="font-mono text-white">GH₵ {orderDeliveryFee}</span>
                       </div>
+                      {orderDiscount > 0 && <div className="flex justify-between text-emerald-300"><span>CHIC10 discount:</span><span className="font-mono">− GH₵ {orderDiscount.toFixed(2)}</span></div>}
+                      <label className="block text-[10px] font-bold text-slate-300">Coupon code<input value={checkoutData.couponCode} onChange={event => setCheckoutData({ ...checkoutData, couponCode: event.target.value.toUpperCase() })} placeholder="CHIC10" className="mt-1 min-h-10 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 text-xs text-white placeholder:text-slate-400" /></label>
                       <div className="pt-3 border-t border-slate-800 flex justify-between items-center text-sm">
                         <span className="font-bold text-rose-400">Total Amount:</span>
                         <span className="text-lg font-black font-mono text-white">GH₵ {orderTotal}</span>
@@ -1339,6 +1419,11 @@ export default function App() {
               </div>
             )}
           </div>
+
+          <section className="space-y-4 rounded-3xl bg-white p-5 md:p-7">
+            <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-rose-500">Follow along</p><h3 className="mt-1 font-serif text-xl font-bold text-slate-900">Find us on Instagram</h3></div><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="text-xs font-bold text-slate-700">@rabischic ↗</a></div>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{products.slice(0, 6).map(product => <button key={`social-${product.id}`} onClick={() => setSelectedProductModal(product)} className="aspect-square overflow-hidden rounded-xl bg-slate-100"><img src={optimizeProductImage(product.mainImage)} loading="lazy" alt={product.name} className="h-full w-full object-cover transition hover:scale-105" /></button>)}</div>
+          </section>
         </main>
       )}
 
@@ -2090,10 +2175,17 @@ export default function App() {
       )}
 
       {/* FOOTER */}
-      <footer className="bg-white/80 backdrop-blur-md border-t border-rose-100 mt-16 py-8 text-center text-xs text-slate-500 space-y-2">
-        <p className="font-serif font-bold text-slate-800 text-sm">Rabi's Chic Fashion & Campus Essentials</p>
-        <p>Serving Casely Hayford, Valco, Oguaa, Adehye, and all UCC Halls with swift hostel delivery.</p>
+      <footer className="mt-16 border-t border-rose-100 bg-white/90 px-4 py-9 text-xs text-slate-500">
+        <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-2 lg:grid-cols-3">
+          <div><p className="font-serif text-base font-bold text-slate-900">Rabi's Chic Fashion &amp; Campus Essentials</p><p className="mt-2 leading-5">Serving Casely Hayford, Valco, Oguaa, Adehye, and UCC halls with hostel delivery.</p><a href="https://www.instagram.com/rabischic/" target="_blank" rel="noreferrer" className="mt-3 inline-block font-bold text-slate-800">Instagram @rabischic ↗</a></div>
+          <div><p className="font-bold uppercase tracking-wider text-slate-800">Help</p><div className="mt-2 flex flex-col items-start gap-2"><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">FAQ</button><button onClick={() => navigateTo('/faq')} className="min-h-9 hover:text-slate-900">Shipping &amp; Returns</button><button onClick={() => navigateTo('/track')} className="min-h-9 hover:text-slate-900">Track Order</button></div></div>
+        <div><p className="font-bold uppercase tracking-wider text-slate-800">Get 10% off your first order</p><p className="mt-2 leading-5">Join the Rabi’s Chic email list for new arrivals and store offers.</p>{newsletterDone ? <p role="status" className="mt-3 rounded-xl bg-emerald-50 p-3 font-semibold text-emerald-800">You’re on the list. Use code CHIC10 at checkout.</p> : <form onSubmit={async event => { event.preventDefault(); try { const { data } = await api.post('/newsletter', { email: newsletterEmail }); setNewsletterDone(true); setCheckoutData(current => ({ ...current, email: current.email || newsletterEmail, couponCode: data.couponCode || 'CHIC10' })); } catch (error) { alert(error.response?.data?.detail || 'Could not subscribe. Please try again.'); } }} className="mt-3 flex gap-2"><input type="email" required value={newsletterEmail} onChange={event => setNewsletterEmail(event.target.value)} placeholder="Email address" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-xs" /><button className="min-h-11 shrink-0 rounded-xl bg-slate-950 px-3 text-xs font-bold text-white">Join</button></form>}</div>
+        </div>
+        <p className="mx-auto mt-8 max-w-6xl border-t border-slate-100 pt-4 text-center">© {new Date().getFullYear()} Rabi's Chic</p>
       </footer>
+
+      <Onupa products={products} onNavigate={navigateTo} onPickProduct={choosePublicProduct} />
+      <WhatsAppButton href={adminWhatsAppHref} />
 
     </div>
   );
