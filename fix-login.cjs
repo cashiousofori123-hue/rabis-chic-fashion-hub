@@ -1,0 +1,1 @@
+const fs=require('fs'); let p='src/pages/AdminLogin.jsx'; if(!fs.existsSync(p)) p='src/components/AdminLogin.jsx'; let c=fs.readFileSync(p,'utf8'); console.log('Found',p); c=c.replace(/\/admin-dashboard/g,'/admin'); fs.writeFileSync(p,c); console.log('Fixed redirect to /admin');
