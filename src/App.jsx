@@ -131,7 +131,6 @@ export default function App() {
   }, []);
   useEffect(() => {
     const aliases = {
-      '/admin-dashboard': '/admin',
       '/rabia-admin-secure-2024': '/rabis-admin-secure-2024',
     };
     const canonicalPath = aliases[routePath];
@@ -953,8 +952,8 @@ export default function App() {
 
   useEffect(() => {
     if ((routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') && authReady && adminSessionReady && adminUnlocked && role === 'admin') {
-      window.history.replaceState({}, '', '/admin');
-      setRoutePath('/admin');
+      window.history.replaceState({}, '', '/admin-dashboard');
+      setRoutePath('/admin-dashboard');
     }
   }, [routePath, authReady, adminSessionReady, adminUnlocked, role]);
 
@@ -969,7 +968,7 @@ export default function App() {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <AdminLoading />;
     if (adminUnlocked && role === 'admin') return <AdminLoading />;
     return <Suspense fallback={<AdminLoading />}>
-      <AdminErrorBoundary><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></AdminErrorBoundary>
+      <AdminErrorBoundary><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin-dashboard'); setRoutePath('/admin-dashboard'); }} /></AdminErrorBoundary>
     </Suspense>;
   }
 
@@ -977,7 +976,7 @@ export default function App() {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <AdminLoading />;
     if (role && role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
     if (!adminUnlocked) {
-      return <Suspense fallback={<AdminLoading />}><AdminErrorBoundary><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></AdminErrorBoundary></Suspense>;
+      return <Suspense fallback={<AdminLoading />}><AdminErrorBoundary><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin-dashboard'); setRoutePath('/admin-dashboard'); }} /></AdminErrorBoundary></Suspense>;
     }
     const pages = {
       '/admin/overview': <Overview />,
@@ -1005,7 +1004,7 @@ export default function App() {
       </div>}
       <Suspense fallback={<AdminLoading />}>
         <AdminErrorBoundary>
-        {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
+        {routePath === '/admin' || routePath === '/admin-dashboard' ? <AdminLayoutComp adminProfile={adminProfile}
           onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
           onLogout={logout} />
           : pages[routePath] || pages['/admin/overview']}
@@ -1216,7 +1215,7 @@ export default function App() {
             {/* Only an authenticated administrator sees the dashboard link. */}
             {isAdminAuthenticated && (
           <button
-                onClick={() => { window.history.pushState({}, '', '/admin-dashboard'); setRoutePath('/admin-dashboard'); }}
+                onClick={() => navigateTo('/admin-dashboard')}
                 className="hidden lg:flex px-2.5 py-2 rounded-xl text-xs font-bold transition items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
                 <span aria-hidden="true" className="h-2 w-2 rounded-full bg-emerald-400"></span><i className="fa-solid fa-user-shield"></i> Admin Dashboard
