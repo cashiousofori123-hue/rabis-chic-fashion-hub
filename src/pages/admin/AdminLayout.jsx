@@ -45,7 +45,7 @@ export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
   const email = user?.email || localStorage.getItem('rabi_user_email') || 'Admin account';
   const avatar = adminProfile?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=075e54&color=fff`;
 
-  const go = path => { setMobileMoreOpen(false); onNavigate?.(path); };
+  const go = path => onNavigate?.(path);
   const bottomTabs = [
     ['/admin/overview', 'Updates', BarChart3],
     ['/admin/orders', 'Calls', CheckCircle2],
