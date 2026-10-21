@@ -733,11 +733,11 @@ def create_access_token(
     admin_session_id: str | None = None,
     device_fingerprint: str | None = None,
 ) -> str:
-    # Admin sessions persist across browser restarts; tokens refresh at one year.
+    # Admin tokens have no time expiry; the active device session revokes them
+    # on logout. Ordinary customer tokens keep their existing fixed lifetime.
     payload = {"sub": email}
-    payload["exp"] = datetime.now(timezone.utc) + (
-        timedelta(days=365) if admin_session_id else timedelta(days=ACCESS_TOKEN_DAYS)
-    )
+    if not admin_session_id:
+        payload["exp"] = datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_DAYS)
     if admin_unlocked:
         payload["admin_unlocked"] = True
     if admin_session_id:
