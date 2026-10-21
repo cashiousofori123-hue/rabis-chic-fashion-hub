@@ -4,6 +4,21 @@ import { getDeviceIdentity } from '../utils/deviceIdentity';
 
 const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
+  const signInResetMarker = 'rabi_admin_auth_reset_v2';
+  if (!localStorage.getItem(signInResetMarker)) {
+    localStorage.removeItem('rabi_admin_access_token');
+    localStorage.removeItem('lastAdminEmail');
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('rabi_user') || 'null');
+      if (storedUser?.role === 'admin') {
+        localStorage.removeItem('rabi_access_token');
+        localStorage.removeItem('rabi_user');
+      }
+    } catch {
+      localStorage.removeItem('rabi_user');
+    }
+    localStorage.setItem(signInResetMarker, 'done');
+  }
   const [authReady, setAuthReady] = useState(() => !localStorage.getItem('rabi_access_token'));
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminSessionReady, setAdminSessionReady] = useState(() => !localStorage.getItem('rabi_admin_access_token'));

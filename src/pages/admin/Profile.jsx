@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../../api';
 import AdminPageShell from './AdminPageShell';
 import { useAuth } from '../../context/AuthContext';
-import ImagePickerNative from '../../components/ImagePickerNative';
+import ImagePickerSheet from '../../components/ImagePickerSheet';
 import { uploadContentImage } from '../../utils/uploadContentImage';
 
 export default function Profile() {
@@ -10,6 +10,7 @@ export default function Profile() {
   const [profile,  setProfile]  = useState({ name: '', title: '', bio: '', avatar: '' });
   const [saving,   setSaving]   = useState(false);
   const [message,  setMessage]  = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     api.get('/store-profile').then(({ data }) => setProfile(data)).catch(() => {});
@@ -30,8 +31,13 @@ export default function Profile() {
       if (!imageBlob || imageBlob.size > 650_000) imageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.62));
       if (!imageBlob || imageBlob.size > 700_000) throw new Error('Could not compress this photo enough. Choose a smaller image.');
       const imageUrl = await uploadContentImage(new File([imageBlob], `profile.${imageBlob.type === 'image/webp' ? 'webp' : 'jpg'}`, { type: imageBlob.type }));
-      setProfile(p => ({ ...p, avatar: imageUrl }));
-      setMessage('Photo uploaded. Save to publish.');
+      const updated = { ...profile, avatar: imageUrl };
+      const { data } = await api.put('/store-profile', updated);
+      setProfile(data);
+      localStorage.setItem('rabi_admin_profile', JSON.stringify(data));
+      localStorage.setItem('rabis_profile_updated_at', String(Date.now()));
+      window.dispatchEvent(new Event('rabis:profile-updated'));
+      setMessage('Profile picture updated.');
     } catch (error) {
       setMessage(error.response?.data?.detail || error.message || 'Could not upload that photo.');
     }
@@ -72,8 +78,8 @@ export default function Profile() {
             className="h-24 w-24 rounded-full border-4 border-rose-100 object-cover" />
         )}
         <div className="space-y-2">
-          <ImagePickerNative onSelect={files => handleImageChange(files[0])} disabled={saving} />
-          <p className="text-[11px] text-slate-500">Image is resized before upload.</p>
+          <button type="button" onClick={() => setPickerOpen(true)} disabled={saving} className="min-h-11 rounded-xl bg-black px-4 text-sm font-bold text-white disabled:opacity-50">Change profile picture</button>
+          <p className="text-[11px] text-slate-500">Choose a photo, take one, or select an image from Files or Drive.</p>
         </div>
       </div>
 
@@ -103,6 +109,7 @@ export default function Profile() {
         {saving ? 'Saving…' : 'Save and publish profile'}
       </button>
     </form>
+    <ImagePickerSheet isOpen={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={file => { setPickerOpen(false); handleImageChange(file); }} title="Change profile picture" />
     </AdminPageShell>
   );
 }

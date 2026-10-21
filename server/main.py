@@ -717,14 +717,9 @@ def _session_is_active(session: dict[str, Any] | None, now: datetime | None = No
     if not session or not session.get("isActive"):
         return False
     expiry_value = session.get("expiresAt")
+    # Sessions without an explicit expiry remain active until an admin logs out.
     if not expiry_value:
-        created_value = session.get("createdAt")
-        if not created_value:
-            return True
-        try:
-            expiry_value = (datetime.fromisoformat(str(created_value).replace("Z", "+00:00")) + timedelta(hours=24)).isoformat()
-        except (TypeError, ValueError):
-            return False
+        return True
     try:
         expires_at = datetime.fromisoformat(str(expiry_value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
@@ -738,11 +733,10 @@ def create_access_token(
     admin_session_id: str | None = None,
     device_fingerprint: str | None = None,
 ) -> str:
-    # Device-bound admin tokens expire after 24 hours; ordinary user tokens keep
-    # their existing 30-day lifetime.
+    # Admin sessions persist across browser restarts; tokens refresh at one year.
     payload = {"sub": email}
     payload["exp"] = datetime.now(timezone.utc) + (
-        timedelta(hours=24) if admin_session_id else timedelta(days=ACCESS_TOKEN_DAYS)
+        timedelta(days=365) if admin_session_id else timedelta(days=ACCESS_TOKEN_DAYS)
     )
     if admin_unlocked:
         payload["admin_unlocked"] = True
@@ -811,7 +805,7 @@ def _create_admin_device_session(
         "userAgent": (request.headers.get("user-agent") or user_agent)[:500],
         "createdAt": current.get("createdAt", now_iso) if same_device else now_iso,
         "lastActiveAt": now_iso,
-        "expiresAt": (now + timedelta(hours=24)).isoformat(),
+        "expiresAt": None,
     }
     if storage.enabled():
         claimed, active_session = storage.claim_admin_session(session, now_iso)
@@ -958,18 +952,22 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     current = _get_admin_session()
-    # A valid email and password starts a fresh sign-in on this device. This
-    # clears stale device passkeys and releases any old single-device session.
-    cleared_session = {"isActive": False, "endedAt": now_iso, "expiresAt": now_iso}
-    if storage.enabled():
-        storage.reset_admin_sign_in_state(cleared_session)
-    else:
-        with DATA_LOCK:
-            _save_admin_session(cleared_session)
-            PASSKEYS.clear()
-            write_data("passkeys.json", PASSKEYS)
-    current = {}
-    session_id = secrets.token_urlsafe(32)
+    same_device = _session_is_active(current, now) and current.get("deviceFingerprint") == payload.deviceFingerprint
+    if current.get("persistentSession") and _session_is_active(current, now) and not same_device:
+        raise HTTPException(status_code=403, detail="Restricted to admin only. This admin account is currently signed in on another device. Please log out there first.", headers={"X-Admin-Session-Active": "true"})
+    if not current.get("persistentSession"):
+        # Clear the previous deployment's expiring session and registered device
+        # keys once, after a valid password, so the owner can sign in cleanly.
+        cleared_session = {"isActive": False, "endedAt": now_iso, "expiresAt": now_iso}
+        if storage.enabled():
+            storage.reset_admin_sign_in_state(cleared_session)
+        else:
+            with DATA_LOCK:
+                _save_admin_session(cleared_session)
+                PASSKEYS.clear()
+                write_data("passkeys.json", PASSKEYS)
+        current = {}
+    session_id = current.get("sessionId") if same_device else secrets.token_urlsafe(32)
     session = {
         "adminId": user["id"],
         "adminEmail": user["email"],
@@ -981,7 +979,8 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         "userAgent": request.headers.get("user-agent", payload.userAgent)[:500],
         "createdAt": now_iso,
         "lastActiveAt": now_iso,
-        "expiresAt": (now + timedelta(hours=24)).isoformat(),
+        "expiresAt": None,
+        "persistentSession": True,
     }
     if storage.enabled():
         claimed, active_session = storage.claim_admin_session(session, now_iso)

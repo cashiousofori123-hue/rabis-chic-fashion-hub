@@ -85,15 +85,16 @@ export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
   return (
     <div className="min-h-screen bg-[#f0f2f5] px-4 py-6 text-slate-800">
       <main className="mx-auto max-w-2xl space-y-5">
-        <button type="button" onClick={() => onNavigate?.('/admin/profile')} className="flex w-full items-center gap-4 rounded-xl bg-white p-4 text-left shadow-sm hover:bg-gray-50">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
+          <div className="flex min-w-0 items-center gap-3">
+            <button type="button" onClick={() => onNavigate?.('/admin/profile')} aria-label="Change admin profile picture" className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2 ring-rose-100 focus:outline-none focus:ring-2 focus:ring-black">
           <img src={avatar} alt="Admin profile" className="h-14 w-14 rounded-full object-cover" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-bold text-slate-900">{adminProfile?.name || 'Admin Profile'}</span>
-            <span className="block truncate text-sm text-slate-500">{email}</span>
-            <span className="mt-1 block text-xs text-slate-500">Be an Eagle not a Chicken</span>
-          </span>
-          <ArrowRight className="text-slate-400" size={20} />
-        </button>
+            </button>
+            <div className="min-w-0"><p className="truncate font-bold text-slate-900">{adminProfile?.name || 'Admin Profile'}</p><p className="truncate text-sm text-slate-500">{email}</p><p className="mt-1 text-xs text-slate-500">Be an Eagle not a Chicken</p></div>
+          </div>
+          <button type="button" onClick={() => onNavigate?.('/')} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-black px-4 text-sm font-bold text-white hover:bg-slate-800"><ExternalLink size={16} /> Visit Site</button>
+        </header>
+        <div className="rounded-xl bg-white px-4 py-3 shadow-sm"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Rabi's Chic</p><h1 className="text-xl font-bold text-slate-900">Admin Dashboard</h1></div>
 
         {GROUPS.map(group => (
           <section key={group.title}>
@@ -109,12 +110,6 @@ export default function AdminLayout({ adminProfile, onNavigate, onLogout }) {
             </div>
           </section>
         ))}
-
-        <a href="/" target="_blank" rel="noreferrer" className="flex w-full items-center gap-3 rounded-xl bg-white p-4 text-sm font-bold text-slate-800 shadow-sm hover:bg-gray-50">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-700"><ExternalLink size={18} /></span>
-          <span className="flex-1">Visit the Site</span>
-          <ArrowRight className="text-slate-400" size={18} />
-        </a>
 
         <button type="button" onClick={enableOrderAlerts} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 p-4 text-sm font-bold text-white shadow-sm hover:bg-emerald-800">
           <span aria-hidden="true">{alertsEnabled ? '🔔' : '♬'}</span>

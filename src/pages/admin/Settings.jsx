@@ -87,7 +87,7 @@ export default function Settings({ adminContact, setAdminContact }) {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8">
         <h3 className="font-serif text-xl font-bold text-slate-900">Client Handover</h3>
-        <p className="mt-2 text-xs leading-5 text-slate-600">Use “Logout / hand over device” above when you are ready. The two-step confirmation closes this single-device session, clears its passkey, and makes Admin Sign In visible so the next authorized admin can enroll their device.</p>
+        <p className="mt-2 text-xs leading-5 text-slate-600">Use “Logout / hand over device” above when you are ready. The two-step confirmation closes this persistent single-device session. Face ID and password sign-in remain available for the next authorized admin.</p>
       </div>
     </div>
     </AdminPageShell>
