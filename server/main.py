@@ -955,19 +955,21 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid admin email or password")
     if not _is_configured_admin(user):
         raise HTTPException(status_code=401, detail="Invalid admin email or password")
-    if _list_passkeys(user["id"]):
-        raise HTTPException(
-            status_code=403,
-            detail="This admin account is secured with a device passkey. Use the registered device's biometric sign-in.",
-        )
-
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     current = _get_admin_session()
-    if _session_is_active(current, now) and current.get("deviceFingerprint") != payload.deviceFingerprint:
-        raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
-    same_device = _session_is_active(current, now)
-    session_id = current.get("sessionId") if same_device else secrets.token_urlsafe(32)
+    # A valid email and password starts a fresh sign-in on this device. This
+    # clears stale device passkeys and releases any old single-device session.
+    cleared_session = {"isActive": False, "endedAt": now_iso, "expiresAt": now_iso}
+    if storage.enabled():
+        storage.reset_admin_sign_in_state(cleared_session)
+    else:
+        with DATA_LOCK:
+            _save_admin_session(cleared_session)
+            PASSKEYS.clear()
+            write_data("passkeys.json", PASSKEYS)
+    current = {}
+    session_id = secrets.token_urlsafe(32)
     session = {
         "adminId": user["id"],
         "adminEmail": user["email"],
@@ -977,7 +979,7 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         "isActive": True,
         "ip": _request_ip(request),
         "userAgent": request.headers.get("user-agent", payload.userAgent)[:500],
-        "createdAt": current.get("createdAt", now_iso) if same_device else now_iso,
+        "createdAt": now_iso,
         "lastActiveAt": now_iso,
         "expiresAt": (now + timedelta(hours=24)).isoformat(),
     }
@@ -988,9 +990,6 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         session = active_session
     else:
         with DATA_LOCK:
-            latest = _get_admin_session()
-            if _session_is_active(latest, now) and latest.get("deviceFingerprint") != payload.deviceFingerprint:
-                raise HTTPException(status_code=403, detail="Admin already signed in on another phone. Only that phone can see the admin portal.", headers={"X-Admin-Session-Active": "true"})
             _save_admin_session(session)
 
     regular_token = create_access_token(email, admin_session_id=session_id, device_fingerprint=payload.deviceFingerprint)

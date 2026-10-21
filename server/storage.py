@@ -375,3 +375,13 @@ def complete_admin_handover(session: dict[str, Any], user_id: str) -> None:
     with _connect() as connection, connection.cursor() as cursor:
         cursor.execute("UPDATE admin_sessions SET payload = %s WHERE session_slot = 1", (_json(session),))
         cursor.execute("DELETE FROM admin_passkeys WHERE user_id = %s", (user_id,))
+
+
+def reset_admin_sign_in_state(session: dict[str, Any]) -> None:
+    """Clear stale device credentials and release the single active sign-in slot."""
+    with _connect() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO admin_sessions (session_slot, payload) VALUES (1, %s) ON CONFLICT (session_slot) DO UPDATE SET payload = EXCLUDED.payload",
+            (_json(session),),
+        )
+        cursor.execute("DELETE FROM admin_passkeys")
