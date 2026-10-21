@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import api from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
 import ImagePickerNative from '../../components/ImagePickerNative';
+import ImagePickerSheet from '../../components/ImagePickerSheet';
 import { uploadContentImage } from '../../utils/uploadContentImage';
 import AdminPageShell from './AdminPageShell';
 
@@ -16,6 +17,8 @@ export default function ContentManager() {
   const [saving, setSaving] = useState(false);
   const [busyImage, setBusyImage] = useState(-1);
   const [msg, setMsg] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSlideIndex, setPickerSlideIndex] = useState(null);
   const slideInputRefs = useRef({});
 
   useEffect(() => {
@@ -25,6 +28,32 @@ export default function ContentManager() {
     }).catch(() => {});
     api.get('/products').then(({ data }) => setProducts(data)).catch(() => {});
   }, []);
+
+  const handleImageReplace = async (file) => {
+    if (pickerSlideIndex === null) return;
+    setSaving(true);
+    setMsg('');
+    try {
+      let uploadFile = file;
+      if (window.createImageBitmap) {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, 1440 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close?.();
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+        if (blob) uploadFile = new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'hero-photo'}.jpg`, { type: 'image/jpeg' });
+      }
+      const imageUrl = await uploadContentImage(uploadFile);
+      updateSlide(pickerSlideIndex, { imageUrl });
+      setMsg('Photo updated. Save to publish.');
+    } catch (error) { setMsg(error.message); }
+    finally {
+      setSaving(false);
+      setPickerOpen(false);
+      setPickerSlideIndex(null);
+    }
+  };
 
   const updateSlide = (index, patch) => setContent(current => ({ ...current, heroSlides: current.heroSlides.map((slide, i) => i === index ? { ...slide, ...patch } : slide) }));
   const moveSlide = (index, offset) => setContent(current => {
@@ -125,8 +154,22 @@ export default function ContentManager() {
             <label className="text-xs font-semibold">Badge<select value={slide.badge || 'None'} onChange={event => updateSlide(index, { badge: event.target.value })} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm">{BADGES.map(badge => <option key={badge}>{badge}</option>)}</select></label><label className="text-xs font-semibold">Button destination<select value={slide.buttonLink || '/shop'} onChange={event => updateSlide(index, { buttonLink: event.target.value })} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm">{LINKS.map(link => <option key={link} value={link}>{link}</option>)}</select></label>
             <label className="text-xs font-semibold">Button text<input maxLength={32} value={slide.buttonText || 'Shop Now'} onChange={event => updateSlide(index, { buttonText: event.target.value })} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-sm" /></label>
           </div>
-          <input ref={element => { slideInputRefs.current[index] = element; }} type="file" accept="image/*" onChange={event => pickImage(index, event)} className="sr-only" /><div className="flex min-h-12 flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-center">{busyImage === index ? <span className="text-sm font-bold">Loading photo...</span> : <><button type="button" onClick={() => { slideInputRefs.current[index]?.removeAttribute('capture'); slideInputRefs.current[index]?.click(); }} className="min-h-10 rounded-lg bg-white px-3 text-xs font-bold shadow-sm">Select photo</button><button type="button" onClick={() => { slideInputRefs.current[index]?.setAttribute('capture', 'environment'); slideInputRefs.current[index]?.click(); }} className="min-h-10 rounded-lg border border-slate-300 px-3 text-xs font-bold">Take photo</button><span className="w-full text-[10px] font-medium text-slate-500">Photo Library · Choose File · Google Drive</span></>}</div>
-          {slide.imageUrl && <img src={slide.imageUrl} alt={`Slide ${index + 1} preview`} className="aspect-video w-full rounded-xl object-cover" />}
+          <input ref={element => { slideInputRefs.current[index] = element; }} type="file" accept="image/*" onChange={event => pickImage(index, event)} className="sr-only" />
+          <div className="flex min-h-12 flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-center">
+            {busyImage === index ? <span className="text-sm font-bold">Loading photo...</span> : <><button type="button" onClick={() => { slideInputRefs.current[index]?.removeAttribute('capture'); slideInputRefs.current[index]?.click(); }} className="min-h-10 rounded-lg bg-white px-3 text-xs font-bold shadow-sm">Select photo</button><button type="button" onClick={() => { slideInputRefs.current[index]?.setAttribute('capture', 'environment'); slideInputRefs.current[index]?.click(); }} className="min-h-10 rounded-lg border border-slate-300 px-3 text-xs font-bold">Take photo</button><span className="w-full text-[10px] font-medium text-slate-500">Photo Library · Choose File · Google Drive</span></>}
+          </div>
+          {slide.imageUrl && (
+            <div className="relative group aspect-video w-full rounded-xl overflow-hidden bg-slate-200">
+              <img src={slide.imageUrl} alt={`Slide ${index + 1} preview`} className="h-full w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => { setPickerSlideIndex(index); setPickerOpen(true); }}
+                className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <span className="px-4 py-2 rounded-full bg-white text-xs font-bold shadow-lg">Replace Image</span>
+              </button>
+            </div>
+          )}
         </article>)}
         <button type="button" onClick={() => setContent(current => ({ ...current, heroSlides: [...current.heroSlides, { ...DEFAULT_SLIDE, id: `slide-${Date.now()}`, title: '' }] }))} className="min-h-12 w-full rounded-xl border border-slate-300 text-sm font-bold">+ Add New Slide</button>
         <p className="text-[11px] text-slate-500">Slides auto-advance every 4 seconds. Customers can use arrows, dots, and swipe on phones.</p>
@@ -135,6 +178,14 @@ export default function ContentManager() {
       <fieldset className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6"><legend className="px-2 text-sm font-black">Featured Products</legend><p className="text-xs text-slate-500">Choose up to six products and add up to six featured photos.</p><div className="grid gap-2 sm:grid-cols-2">{products.map(product => <label key={product.id} className="flex min-h-16 items-center gap-3 rounded-xl border border-slate-200 p-2"><input type="checkbox" checked={selected.includes(product.id)} disabled={!selected.includes(product.id) && selected.length >= 6} onChange={() => toggleFeatured(product.id)} /><img src={product.mainImage} alt="" className="h-12 w-10 rounded-lg object-cover"/><span className="min-w-0 flex-1 truncate text-xs font-bold">{product.name}</span><span title="GHS · Ghana cedi" className="text-[10px] text-slate-500">{formatCurrency(product.price)}</span></label>)}</div><div className="space-y-3 border-t border-slate-100 pt-3"><p className="text-xs font-bold text-slate-700">Featured photos</p><ImagePickerNative multiple onSelect={pickFeaturedImages} disabled={busyImage === -2 || (content.featured?.bannerImages || []).length >= 6} compact />{busyImage === -2 && <p className="text-center text-xs text-slate-500">Uploading featured photos…</p>}<div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{(content.featured?.bannerImages || []).map((imageUrl, index) => <div key={`${index}-${imageUrl.slice(0, 32)}`} className="relative aspect-square overflow-hidden rounded-lg border border-slate-200"><img src={imageUrl} alt={`Featured photo ${index + 1}`} className="h-full w-full object-cover"/><button type="button" aria-label={`Remove featured photo ${index + 1}`} onClick={() => setContent(current => ({ ...current, featured: { ...current.featured, bannerImages: current.featured.bannerImages.filter((_, itemIndex) => itemIndex !== index) } }))} className="absolute right-1 top-1 grid h-8 w-8 place-items-center rounded-full bg-white text-sm font-bold shadow">×</button></div>)}</div></div></fieldset>
       <details className="rounded-2xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-bold">Edit product display names and prices</summary><div className="mt-3 space-y-2">{products.map((product, index) => <div key={product.id} className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2"><input aria-label={`Name for ${product.name}`} value={product.name} onChange={event => setProducts(list => list.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} className="min-w-0 rounded-lg border border-slate-300 px-2 py-2 text-xs"/><input aria-label={`Price for ${product.name}`} type="number" min="0.01" step="0.01" value={product.price} onChange={event => setProducts(list => list.map((item, i) => i === index ? { ...item, price: Number(event.target.value) } : item))} className="rounded-lg border border-slate-300 px-2 py-2 text-xs"/></div>)}</div></details>
       {msg && <p role="status" className={`rounded-xl p-3 text-sm font-semibold ${msg.startsWith('Updated') || msg.startsWith('Photo') ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>{msg}</p>}
+
+      <ImagePickerSheet
+        isOpen={pickerOpen}
+        onClose={() => { setPickerOpen(false); setPickerSlideIndex(null); }}
+        onSelect={handleImageReplace}
+        title="Replace Hero Image"
+      />
+
       <button type="submit" disabled={saving} className="fixed inset-x-3 bottom-3 z-40 mx-auto min-h-12 max-w-4xl rounded-full bg-slate-950 px-6 text-sm font-bold text-white shadow-2xl disabled:opacity-60">{saving ? 'Saving...' : 'Save and Update Live Site'}</button>
     </form>
   </AdminPageShell>;

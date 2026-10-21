@@ -8,6 +8,9 @@ import { telLink, whatsappLink } from './utils/contactLinks';
 import Onupa from './components/Onupa';
 import ApprovalStatus from './components/ApprovalStatus';
 import WhatsAppButton from './components/WhatsAppButton';
+import ComboProductName from './components/ComboProductName';
+import Invoice from './components/Invoice';
+
 const SearchPage = lazy(() => import('./pages/Search'));
 const WishlistPage = lazy(() => import('./pages/Wishlist'));
 const FAQPage = lazy(() => import('./pages/FAQ'));
@@ -187,6 +190,7 @@ export default function App() {
   const [newProdDesc, setNewProdDesc] = useState('');
   const [newProdImages, setNewProdImages] = useState([]);
 
+  const [customPrice, setCustomPrice] = useState('');
   // Admin Profile State
   const [adminProfile, setAdminProfile] = useState(() => {
     const saved = localStorage.getItem('rabi_admin_profile');
@@ -964,6 +968,7 @@ export default function App() {
       '/admin/profile': <ProfilePage />,
       '/admin/messages': <MessagesPage />,
       '/admin/settings': <SettingsPage adminContact={adminContact} setAdminContact={setAdminContact} transferEmail={transferEmail} setTransferEmail={setTransferEmail} />,
+      '/admin/socials': <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}><SocialsPage /></Suspense>,
     };
     return <>
       {adminOrderAlert && <div role="status" className="fixed right-4 top-4 z-[100] w-[min(92vw,26rem)] rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl">
@@ -1692,7 +1697,7 @@ export default function App() {
                   </div>
                   <div>
                     <span className="text-slate-400 block font-medium">Phone Support</span>
-                    {adminPhoneHref ? <a href={adminPhoneHref} className="font-bold text-slate-900 text-sm">{adminContact.phone}</a> : <span className="text-slate-500">Not available yet</span>}
+                    {adminContact.phone ? <a href={adminPhoneHref} className="font-bold text-slate-900 text-sm">{adminContact.phone}</a> : <span className="text-slate-500">Not available yet</span>}
                   </div>
                 </div>
 
@@ -1703,6 +1708,36 @@ export default function App() {
                   <div>
                     <span className="text-slate-400 block font-medium">WhatsApp Support</span>
                     {adminWhatsAppHref ? <a href={adminWhatsAppHref} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Chat on WhatsApp</a> : <span className="text-slate-500">Not available yet</span>}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 p-3 bg-blue-50 rounded-2xl">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-base">
+                    <i className="fa-brands fa-facebook"></i>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">Facebook</span>
+                    {adminContact.facebook ? <a href={adminContact.facebook} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Visit Page</a> : <span className="text-slate-500">Not available yet</span>}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 p-3 bg-pink-50 rounded-2xl">
+                  <div className="w-10 h-10 rounded-xl bg-pink-600 text-white flex items-center justify-center text-base">
+                    <i className="fa-brands fa-instagram"></i>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">Instagram</span>
+                    {adminContact.instagram ? <a href={adminContact.instagram} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Follow Us</a> : <span className="text-slate-500">Not available yet</span>}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 p-3 bg-slate-100 rounded-2xl">
+                  <div className="w-10 h-10 rounded-xl bg-slate-800 text-white flex items-center justify-center text-base">
+                    <i className="fa-brands fa-tiktok"></i>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">TikTok</span>
+                    {adminContact.tiktok ? <a href={adminContact.tiktok} target="_blank" rel="noreferrer" className="font-bold text-slate-900 text-sm">Watch Videos</a> : <span className="text-slate-500">Not available yet</span>}
                   </div>
                 </div>
 

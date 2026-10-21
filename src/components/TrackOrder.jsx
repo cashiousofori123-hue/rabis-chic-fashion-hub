@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import api from '../api';
 import 'leaflet/dist/leaflet.css';
+import confetti from 'canvas-confetti';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -21,6 +22,7 @@ const DEFAULT_DESTINATION = [5.115, -1.288];
 const MAP_TILES = {
   street: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   light: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 };
 const WS_TIMEOUT_MS = 3000;
 
@@ -45,6 +47,13 @@ const riderIcon = L.divIcon({
   iconAnchor: [18, 18],
 });
 
+const shopIcon = L.divIcon({
+  className: 'rabi-shop-marker',
+  html: '<span style="display:flex;width:34px;height:34px;align-items:center;justify-content:center;border:2px solid white;border-radius:50%;background:#ea4335;color:white;font-size:17px;box-shadow:0 2px 8px #0f172a55">⌂</span>',
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
+});
+
 const haversineKm = (a, b) => {
   const radians = Math.PI / 180;
   const dLat = (b[0] - a[0]) * radians;
@@ -57,8 +66,6 @@ function FitMapOnce({ orderId, destination }) {
   const map = useMap();
   useEffect(() => {
     map.fitBounds([SHOP_POINT, destination], { paddingTopLeft: [28, 140], paddingBottomRight: [28, 240], maxZoom: 15 });
-  // Reframe for a new order or destination, not every rider GPS update.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, orderId, destination[0], destination[1]]);
   return null;
 }
@@ -150,6 +157,7 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [arrivalNoticeOpen, setArrivalNoticeOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const socketRef = useRef(null);
   const watchRef = useRef(null);
   const pollRef = useRef(null);
@@ -384,8 +392,21 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
     if (order && !delivered && isSamePlace) {
       setArrivalNoticeOpen(true);
       navigator.vibrate?.([200, 100, 200, 100, 400]);
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, colors: ['#4285f4', '#ea4335', '#fbbc05', '#34a853'] });
     }
   }, [delivered, isSamePlace, order?.id]);
+
+  const simulateMoveCloser = () => {
+    if (!destinationPoint) return;
+    setLocation(prev => {
+      const current = prev ? [Number(prev.lat), Number(prev.lng)] : SHOP_POINT;
+      const next = [
+        current[0] + (destinationPoint[0] - current[0]) * 0.2,
+        current[1] + (destinationPoint[1] - current[1]) * 0.2,
+      ];
+      return { ...prev, lat: next[0], lng: next[1], distanceMeters: haversineKm(next, destinationPoint) * 1000 };
+    });
+  };
 
   if (!order) return <main className="grid h-screen place-items-center bg-[#f3f6fc] px-6 text-center text-slate-600">Place or select an order to see its delivery map.</main>;
 
@@ -395,12 +416,12 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
       <div className="absolute inset-0">
         <MapContainer center={SHOP_POINT} zoom={14} className="h-full w-full" zoomControl={false} scrollWheelZoom>
           <FitMapOnce orderId={order.id} destination={destinationPoint} />
-          <MapFocus position={customerLocation || riderPoint} mapType={() => setMapStyle(current => current === 'street' ? 'light' : 'street')} />
+          <MapFocus position={customerLocation || riderPoint} mapType={() => setMapStyle(current => current === 'street' ? 'light' : current === 'light' ? 'satellite' : 'street')} />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url={MAP_TILES[mapStyle]} subdomains="abc" />
           {routeLine.length > 1
             ? <Polyline positions={routeLine} pathOptions={{ color: '#7c3aed', weight: 7, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} />
             : <Polyline positions={[routeStart, destinationPoint]} pathOptions={{ color: '#7c3aed', weight: 6, opacity: 0.9, dashArray: '10 10' }} />}
-          {!riderPoint && <Marker position={SHOP_POINT} icon={L.divIcon({ className: 'rabi-shop-marker', html: '<span style="display:flex;width:34px;height:34px;align-items:center;justify-content:center;border:2px solid white;border-radius:50%;background:#1a73e8;color:white;font-size:17px;box-shadow:0 2px 8px #0f172a55">⌂</span>', iconSize: [34, 34], iconAnchor: [17, 17] })} />}
+          <Marker position={SHOP_POINT} icon={shopIcon} zIndexOffset={400} />
           {customerLocation && <Marker position={customerLocation} icon={blueDotIcon} zIndexOffset={800} />}
           {riderPoint && <AnimatedRider position={riderPoint} />}
           <Marker position={destinationPoint} icon={destinationIcon} zIndexOffset={600} />
@@ -487,8 +508,20 @@ export default function TrackOrder({ order, orders = [], onOrderChange, canShare
           <div className="mt-3 flex items-center justify-between text-[10px] text-slate-400"><span>{orderAddress}</span><span className="inline-flex items-center gap-1"><Clock3 size={12} /> Updated live</span></div>
         </div>
       </section>
+
+      <div className={`absolute bottom-4 right-4 z-[900] transition-all ${debugOpen ? 'scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none'}`}>
+        <div className="rounded-2xl bg-slate-900/90 p-4 text-white shadow-2xl backdrop-blur-md">
+          <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Courier Debug</h3>
+          <div className="flex flex-col gap-2">
+            <button type="button" onClick={simulateMoveCloser} className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold hover:bg-blue-500">Simulate Move Closer</button>
+            <button type="button" onClick={() => setLocation(null)} className="flex items-center justify-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold hover:bg-slate-600">Reset Rider Pos</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" onClick={() => setDebugOpen(!debugOpen)} className="absolute bottom-4 right-4 z-[1000] h-6 w-6 rounded-full bg-slate-300/50 text-[8px] font-bold text-slate-600 hover:bg-slate-400">DBG</button>
+
       {arrivalNoticeOpen && isSamePlace && !delivered && <div className="fixed inset-0 z-[950] grid place-items-center bg-black/50 p-4"><section role="dialog" aria-modal="true" className="w-full max-w-sm rounded-3xl bg-white p-6 text-center shadow-2xl"><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl text-emerald-700">✓</div><h2 className="mt-4 text-xl font-black text-slate-900">You are both at the same place!</h2><p className="mt-2 text-sm text-slate-600">{canShare ? 'Confirm that you have reached the customer.' : 'Your rider has arrived at your location.'}</p>{canShare && <button type="button" onClick={async () => { await confirmDelivery(); setArrivalNoticeOpen(false); }} className="mt-5 min-h-12 w-full rounded-full bg-emerald-600 font-bold text-white">Mark as Delivered ✓</button>}<button type="button" onClick={() => setArrivalNoticeOpen(false)} className="mt-2 min-h-11 w-full rounded-full text-sm font-semibold text-slate-500">{canShare ? 'Close' : 'Got it'}</button></section></div>}
-      {delivered && !reviewDismissed && !order.rating && <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"><section role="dialog" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">{reviewSubmitted ? <><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl">✓</div><h2 className="mt-4 text-center text-xl font-black">Thanks for your review!</h2><p className="mt-2 text-center text-sm text-slate-500">Your delivery feedback was saved.</p><button onClick={() => setReviewDismissed(true)} className="mt-5 min-h-12 w-full rounded-full bg-slate-950 font-bold text-white">Close</button></> : <form onSubmit={submitDeliveryReview}><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl">✓</div><h2 className="mt-4 text-center text-xl font-black">Order Delivered Successfully</h2><p className="mt-2 text-center text-sm text-slate-500">Your order {order.id} arrived at {destinationLabel}.</p><p className="mt-5 text-center text-sm font-bold">Rate your delivery</p><div className="mt-2 flex justify-center gap-1">{[1, 2, 3, 4, 5].map(star => <button key={star} type="button" onClick={() => setReviewRating(star)} aria-label={`${star} stars`} className={`min-h-12 min-w-12 text-3xl ${star <= reviewRating ? 'text-amber-400' : 'text-slate-300'}`}>★</button>)}</div><textarea value={reviewText} onChange={event => setReviewText(event.target.value)} maxLength={1200} rows={3} placeholder="How was your delivery? (optional)" className="mt-3 w-full rounded-xl border border-slate-200 p-3 text-sm"/><button disabled={!reviewRating || reviewBusy} className="mt-3 min-h-12 w-full rounded-full bg-slate-950 font-bold text-white disabled:opacity-40">{reviewBusy ? 'Saving...' : 'Submit Rating'}</button><button type="button" onClick={() => setReviewDismissed(true)} className="mt-2 min-h-11 w-full text-sm text-slate-500">Maybe later</button></form>}</section></div>}
+      {delivered && !reviewDismissed && !order.rating && <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"><section role="dialog" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">{reviewSubmitted ? <><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl">✓</div><h2 className="mt-4 text-center text-xl font-black">Thanks for your review!</h2><p className="mt-2 text-center text-sm text-slate-500">Your delivery feedback was saved.</p><button onClick={() => setReviewDismissed(true)} className="mt-5 min-h-12 w-full rounded-full bg-slate-950 font-bold text-white">Close</button></> : <form onSubmit={submitDeliveryReview}><div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-100 text-3xl">✓</div><h2 className="mt-4 text-center text-xl font-black">Order Delivered Successfully</h2><p className="mt-5 text-center text-sm font-bold">Rate your delivery</p><div className="mt-2 flex justify-center gap-1">{[1, 2, 3, 4, 5].map(star => <button key={star} type="button" onClick={() => setReviewRating(star)} aria-label={`${star} stars`} className={`min-h-12 min-w-12 text-3xl ${star <= reviewRating ? 'text-amber-400' : 'text-slate-300'}`}>★</button>)}</div><textarea value={reviewText} onChange={event => setReviewText(event.target.value)} maxLength={1200} rows={3} placeholder="How was your delivery? (optional)" className="mt-3 w-full rounded-xl border border-slate-200 p-3 text-sm"/><button disabled={!reviewRating || reviewBusy} className="mt-3 min-h-12 w-full rounded-full bg-slate-950 font-bold text-white disabled:opacity-40">{reviewBusy ? 'Saving...' : 'Submit Rating'}</button><button type="button" onClick={() => setReviewDismissed(true)} className="mt-2 min-h-11 w-full text-sm text-slate-500">Maybe later</button></form>}</section></div>}
     </main>
   );
 }

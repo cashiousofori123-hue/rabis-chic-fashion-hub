@@ -56,16 +56,45 @@ export default function Orders() {
     catch (error) { alert(error.response?.data?.detail || 'Could not send reply.'); }
     finally { setChatBusy(false); }
   };
-  const sortedOrders = [...orders].sort((a, b) => (Number(b.unreadCount) || 0) - (Number(a.unreadCount) || 0) || new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const sortedOrders = [...orders].sort((a, b) => {
+    const dateA = new Date(a.createdAt || 0);
+    const dateB = new Date(b.createdAt || 0);
+    return dateB - dateA;
+  });
+
   return <AdminPageShell title="Orders">
     <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-      <header className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-900">Orders &amp; Dispatch</h2><p className="mt-1 text-xs text-slate-500">{orders.filter(order => order.approvalStatus === 'pending_approval' || String(order.status).includes('Pending')).length} new orders waiting approval.</p></div><span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-bold">{orders.length} total</span></header>
+      <header className="flex items-center justify-between gap-3">
+        <div className="relative">
+          <h2 className="text-lg font-bold text-slate-900">Orders &amp; Dispatch</h2>
+          <p className="mt-1 text-xs text-slate-500">{orders.filter(order => order.approvalStatus === 'pending_approval' || String(order.status).includes('Pending')).length} new orders waiting approval.</p>
+          {orders.some(order => order.approvalStatus === 'pending_approval' || String(order.status).includes('Pending')) && (
+            <div className="absolute -top-2 -left-2 px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">
+              {orders.filter(order => order.approvalStatus === 'pending_approval' || String(order.status).includes('Pending')).length} NEW ORDERS
+            </div>
+          )}
+        </div>
+        <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-bold">{orders.length} total</span>
+      </header>
+
       {!sortedOrders.length ? <p className="rounded-xl bg-slate-50 p-8 text-center text-sm text-slate-500">No customer orders yet.</p> : <div className="space-y-3">{sortedOrders.map(order => {
         const created = order.createdAt ? new Date(order.createdAt) : null;
         const transit = String(order.status || '').toLowerCase().includes('transit');
         return <article key={order.id} className="min-w-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
           <div className="flex min-w-0 items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5"><span title={order.id} className="max-w-[140px] truncate rounded-full bg-red-50 px-2 py-1 font-mono text-[10px] font-bold text-red-700">{order.id}</span>{(order.approvalStatus === 'pending_approval' || String(order.status).includes('Pending')) && <><span className="shrink-0 rounded-full bg-yellow-100 px-2 py-1 text-[10px] font-bold text-amber-900">⏳ Waiting Approval</span><span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">1</span></>}<span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${transit ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{order.status}</span>{Number(order.unreadCount) > 0 && <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{order.unreadCount}</span>}</div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span title={order.id} className="max-w-[140px] truncate rounded-full bg-red-50 px-2 py-1 font-mono text-[10px] font-bold text-red-700">{order.id}</span>
+              {(order.approvalStatus === 'pending_approval' || String(order.status).includes('Pending')) && (
+                <div className="flex items-center gap-1">
+                  <span className="grid h-2 w-2 rounded-full bg-red-600 animate-ping"></span>
+                  <span className="shrink-0 rounded-full bg-yellow-100 px-2 py-1 text-[10px] font-bold text-amber-900">⏳ Waiting Approval</span>
+                  <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">1</span>
+                </div>
+              )}
+              <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${transit ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>{order.status}</span>
+              {Number(order.unreadCount) > 0 && <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{order.unreadCount}</span>}
+            </div>
+
             <span title={order.customer} className="max-w-[110px] shrink-0 truncate text-right text-xs font-bold text-slate-900">{order.customer}</span>
           </div>
           <p className="break-words text-xs text-slate-700"><b>{order.items}</b> · Qty {order.quantity} · <b title="GHS - Ghana cedi" className="text-red-700">{formatCurrency(order.amount)}</b></p>

@@ -19,6 +19,7 @@ const GROUPS = [
       ['/admin/messages', 'Messages', 'Customer notes & inquiries', Mail],
       ['/admin/users', 'Pending Users', 'Approve accounts', Users],
       ['/admin/content', 'Content Manager', 'Hero, prices, images', FileImage],
+      ['/admin/socials', 'Socials', 'Manage links & contact', Settings],
     ],
   },
   {

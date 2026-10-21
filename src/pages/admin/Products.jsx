@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, LockKeyhole, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, LockKeyhole, Pencil, Plus, ShieldCheck, Trash2, X, Edit2 } from 'lucide-react';
 import api from '../../api';
 import { formatCurrency } from '../../utils/formatCurrency';
 import ImagePickerNative from '../../components/ImagePickerNative';
 import { uploadContentImage } from '../../utils/uploadContentImage';
+import ImagePickerSheet from '../../components/ImagePickerSheet';
 import AdminPageShell from './AdminPageShell';
 
 const CATEGORIES = ['Women', 'Men', 'Dresses', 'Tops', 'Bags', 'Shoes', 'Accessories'];
@@ -44,6 +45,11 @@ export default function Products() {
   const [selected, setSelected] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [priceEditingId, setPriceEditingId] = useState(null);
+  const [priceValue, setPriceValue] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerProduct, setPickerProduct] = useState(null);
+  const [pickerImageIndex, setPickerImageIndex] = useState(null);
   const previewUrlsRef = useRef(new Set());
 
   const reload = () => api.get('/products').then(({ data }) => {
@@ -116,11 +122,45 @@ export default function Products() {
     } finally { setSaving(false); }
   };
 
-  const toggleSelected = (id) => setSelected(current => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
+  const handleSavePrice = async (id, value) => {
+    try {
+      await api.patch(`/products/${id}`, { price: value });
+      await reload();
+    } catch (err) {
+      setError('Could not update price.');
+    } finally {
+      setPriceEditingId(null);
+    }
+  };
+
+  const handleImageReplace = async (file) => {
+    if (!pickerProduct) return;
+    setSaving(true);
+    setError('');
+    try {
+      const compressed = await compressPhoto(file);
+      const url = await uploadContentImage(compressed);
+
+      const product = products.find(p => p.id === pickerProduct.id);
+      const images = product.images ? [...product.images] : (product.mainImage ? [product.mainImage] : []);
+
+      if (pickerImageIndex !== null && pickerImageIndex < images.length) {
+        images[pickerImageIndex] = url;
+      } else {
+        images.push(url);
+      }
+
+      await api.patch(`/products/${pickerProduct.id}`, { images });
+      await reload();
+    } catch (err) {
+      setError(err.message || 'Could not replace image.');
+    } finally {
+      setSaving(false);
+      setPickerOpen(false);
+      setPickerProduct(null);
+      setPickerImageIndex(null);
+    }
+  };
 
   const removeProduct = async (product) => {
     if (product.isDefault) return;
@@ -148,9 +188,36 @@ export default function Products() {
   const renderCard = (product) => {
     const status = statusFor(product.status);
     const unavailable = ['out_of_stock', 'sold'].includes(product.status);
+    const images = product.images?.length ? product.images : (product.mainImage ? [product.mainImage] : []);
+
     return <article key={product.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="relative aspect-[4/3] bg-slate-100">
-        <img src={product.mainImage} alt={product.name} className={`h-full w-full object-cover ${unavailable ? 'grayscale opacity-50' : ''}`} loading="lazy" />
+        <div className="grid h-full w-full grid-cols-2 gap-1 p-1">
+          {images.slice(0, 4).map((img, idx) => (
+            <div key={idx} className="relative aspect-square overflow-hidden rounded-xl bg-slate-200 group">
+              <img src={img} alt={product.name} className={`h-full w-full object-cover ${unavailable ? 'grayscale opacity-50' : ''}`} loading="lazy" />
+              <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
+                <button
+                  type="button"
+                  onClick={() => { setPickerProduct(product); setPickerImageIndex(idx); setPickerOpen(true); }}
+                  className="p-1.5 rounded-full bg-white text-slate-900 hover:bg-slate-100 shadow-sm"
+                  title="Replace Image"
+                >
+                  <Edit2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { if (!product.isDefault && window.confirm('Remove this image?')) { const next = images.filter((_, i) => i !== idx); api.patch(`/products/${product.id}`, { images: next }).then(reload); } }}
+                  className="p-1.5 rounded-full bg-white text-red-600 hover:bg-slate-100 shadow-sm"
+                  title="Delete Image"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+          {images.length === 0 && <img src={product.mainImage} alt={product.name} className="h-full w-full object-cover" />}
+        </div>
         <span className={`absolute left-2 top-2 rounded-full px-2.5 py-1 text-[10px] font-bold ${status.classes}`}>{status.label}</span>
         {product.isDefault
           ? <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-slate-700 shadow"><LockKeyhole size={12} /> Default</span>
@@ -159,7 +226,30 @@ export default function Products() {
           </label>}
       </div>
       <div className="space-y-3 p-3.5">
-        <div className="min-h-12"><h3 className="line-clamp-1 text-sm font-bold text-slate-900">{product.name}</h3><p title="GHS - Ghana cedi" className="mt-1 line-clamp-1 text-xs text-slate-500">{product.category} · {formatCurrency(Number(product.price).toFixed(2))}</p></div>
+        <div className="min-h-12">
+          <h3 className="line-clamp-1 text-sm font-bold text-slate-900">{product.name}</h3>
+          <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+            <span className="line-clamp-1">{product.category} · </span>
+            {priceEditingId === product.id ? (
+              <input
+                autoFocus
+                type="number"
+                className="w-20 rounded border border-slate-300 px-1 py-0.5 outline-none focus:ring-1 ring-slate-400"
+                value={priceValue}
+                onChange={e => setPriceValue(e.target.value)}
+                onBlur={() => handleSavePrice(product.id, priceValue)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSavePrice(product.id, priceValue); }}
+              />
+            ) : (
+              <span
+                className="cursor-pointer font-medium text-slate-700 hover:text-slate-900"
+                onClick={() => { setPriceEditingId(product.id); setPriceValue(String(product.price)); }}
+              >
+                {formatCurrency(Number(product.price).toFixed(2))}
+              </span>
+            )}
+          </div>
+        </div>
         <div className="flex items-center gap-2 border-t border-slate-100 pt-2">
           {product.isDefault ? <span className="flex min-h-11 flex-1 items-center gap-1.5 text-[11px] font-semibold text-slate-500"><ShieldCheck size={15} /> Protected default</span> : <>
             <button type="button" onClick={() => startEdit(product)} className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-100 px-3 text-xs font-bold text-slate-700"><Pencil size={15} /> Edit</button>
@@ -189,6 +279,13 @@ export default function Products() {
           <button type="button" onClick={deleteSelected} className="flex min-h-11 items-center gap-1 rounded-xl bg-red-600 px-3 text-xs font-bold"><Trash2 size={15} /> Delete</button>
         </div>
       </div>}
+
+      <ImagePickerSheet
+        isOpen={pickerOpen}
+        onClose={() => { setPickerOpen(false); setPickerProduct(null); setPickerImageIndex(null); }}
+        onSelect={handleImageReplace}
+        title="Replace Product Image"
+      />
 
       {formOpen && <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/50 sm:grid sm:place-items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setFormOpen(false); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="product-form-title" className="min-h-[100dvh] bg-white sm:min-h-0 sm:w-full sm:max-w-2xl sm:rounded-2xl sm:shadow-2xl">
