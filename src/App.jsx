@@ -143,6 +143,12 @@ export default function App() {
     let active = true;
     const refresh = () => api.get('/admin/session-status').then(({ data }) => {
       if (!active) return;
+      if (adminUnlocked && role === 'admin') {
+        setHasActiveAdmin(true);
+        setAdminSessionOnThisDevice(true);
+        setActiveAdminEmail(user?.email || localStorage.getItem('lastAdminEmail') || '');
+        return;
+      }
       setHasActiveAdmin(Boolean(data.hasActiveAdmin));
       setAdminSessionOnThisDevice(Boolean(data.isCurrentDevice));
       setActiveAdminEmail(data.activeEmail || '');
@@ -150,7 +156,7 @@ export default function App() {
     refresh();
     const timer = window.setInterval(refresh, 5000);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [adminUnlocked, role, user?.email]);
 
   useEffect(() => {
     const requestLogout = () => { setAdminLogoutStep(1); setAdminLogoutError(''); setAdminLogoutPassword(''); };

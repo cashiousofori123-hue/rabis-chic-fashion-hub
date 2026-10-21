@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Mail, Menu, Settings, ShieldCheck, Users, X } from 'lucide-react';
+import { ArrowRight, BarChart3, Box, CheckCircle2, ExternalLink, FileImage, LogOut, Mail, Menu, Settings, ShieldCheck, Users, UserRound, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const NAV_ITEMS = [
@@ -12,6 +12,14 @@ const NAV_ITEMS = [
   ['/admin/users', 'Users', Users],
   ['/admin/profile', 'Profile', ShieldCheck],
   ['/admin/settings', 'Settings', Settings],
+];
+
+const BOTTOM_TABS = [
+  ['/admin/overview', 'Updates', BarChart3],
+  ['/admin/orders', 'Calls', CheckCircle2],
+  ['/admin/users', 'Communities', Users],
+  ['/admin/messages', 'Chats', Mail],
+  ['/admin', 'You', UserRound],
 ];
 
 export default function AdminPageShell({ title, children, onNavigate, onLogout }) {
@@ -45,7 +53,7 @@ export default function AdminPageShell({ title, children, onNavigate, onLogout }
         {mobileMenuOpen && <div className="absolute inset-x-0 top-full border-b border-slate-200 bg-white p-3 shadow-lg"><nav aria-label="Admin navigation" className="grid grid-cols-2 gap-2">{navItems}<button type="button" onClick={requestLogout} className="col-span-2 flex min-h-11 items-center justify-center gap-2 rounded-xl border border-black bg-white text-sm font-bold"><LogOut size={16} /> Log out</button></nav></div>}
       </header>
 
-      <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 gap-5 px-3 py-4 sm:px-5 lg:grid-cols-[250px_minmax(0,1fr)] lg:gap-7 lg:px-7 lg:py-7">
+      <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 gap-5 px-3 py-4 pb-24 sm:px-5 lg:grid-cols-[250px_minmax(0,1fr)] lg:gap-7 lg:px-7 lg:py-7 lg:pb-24">
         <aside className="hidden lg:block">
           <div className="sticky top-7 space-y-4">
             <section className="rounded-2xl border border-black bg-white p-4 shadow-sm">
@@ -70,6 +78,11 @@ export default function AdminPageShell({ title, children, onNavigate, onLogout }
           <main className="min-w-0 rounded-2xl border border-black bg-white p-3 shadow-sm sm:p-5 lg:p-6">{children}</main>
         </div>
       </div>
+      <nav aria-label="Admin dashboard tabs" className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
+        <div className="mx-auto grid max-w-[430px] grid-cols-5">
+          {BOTTOM_TABS.map(([path, label, Icon]) => <button key={label} type="button" onClick={() => navigate(path)} aria-current={activePath === path ? 'page' : undefined} className={`relative flex min-h-16 flex-col items-center justify-center gap-1 text-[10px] font-semibold ${activePath === path ? 'text-[#075e54]' : 'text-slate-500'}`}><Icon size={20} /><span>{label}</span>{activePath === path && <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-[#25d366]" />}</button>)}
+        </div>
+      </nav>
     </div>
   );
 }
