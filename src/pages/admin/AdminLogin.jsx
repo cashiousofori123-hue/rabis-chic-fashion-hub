@@ -1,52 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Fingerprint, LockKeyhole, ShieldCheck } from 'lucide-react';
-import { startAuthentication } from '@simplewebauthn/browser';
+import { useState } from 'react';
+import { ArrowLeft, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../api';
 
 export default function AdminLogin({ onSuccess }) {
-  const { loginAdmin, loginWithAdminPasskey } = useAuth();
+  const { loginAdmin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const googleButton = useRef(null);
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-
-  useEffect(() => {
-    if (!googleClientId || !googleButton.current) return undefined;
-    let cancelled = false;
-    const renderButton = () => {
-      if (cancelled || !googleButton.current || !window.google?.accounts?.id) return;
-      window.google.accounts.id.initialize({ client_id: googleClientId, callback: async response => {
-        setBusy(true);
-        setError('');
-        try {
-          const { data } = await api.post('/auth/google', { idToken: response.credential });
-          loginWithAdminPasskey(data);
-          onSuccess?.();
-        } catch (err) {
-          setError(err.response?.data?.detail || 'Google sign-in could not be completed.');
-        } finally { setBusy(false); }
-      } });
-      window.google.accounts.id.renderButton(googleButton.current, { theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', width: 360 });
-    };
-    if (window.google?.accounts?.id) renderButton();
-    else {
-      let script = document.querySelector('script[data-google-identity]');
-      if (!script) {
-        script = document.createElement('script');
-        script.src = 'https://accounts.google.com/gsi/client';
-        script.async = true;
-        script.defer = true;
-        script.dataset.googleIdentity = 'true';
-        document.head.appendChild(script);
-      }
-      script.addEventListener('load', renderButton, { once: true });
-    }
-    return () => { cancelled = true; };
-  }, [googleClientId]);
-
   const signIn = async event => {
     event.preventDefault();
     setBusy(true);
@@ -60,21 +21,6 @@ export default function AdminLogin({ onSuccess }) {
     } finally {
       setBusy(false);
     }
-  };
-
-  const signInWithPasskey = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      const { data: ceremony } = await api.post('/auth/passkey/login/begin');
-      const credential = await startAuthentication({ optionsJSON: ceremony.options });
-      const { data } = await api.post('/auth/passkey/login/finish', { challenge_token: ceremony.challenge_token, credential });
-      loginWithAdminPasskey(data);
-      localStorage.setItem('lastAdminEmail', data.user.email);
-      onSuccess?.();
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Face ID sign-in could not be completed. Try your email and password.');
-    } finally { setBusy(false); }
   };
 
   return (
@@ -101,9 +47,6 @@ export default function AdminLogin({ onSuccess }) {
             {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm leading-5 text-red-800">{error}</p>}
             <button type="submit" disabled={busy} className="min-h-12 w-full rounded-xl bg-black px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60">{busy ? 'Signing in…' : 'Sign in to dashboard'}</button>
           </form>
-          <div className="my-5 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>Or sign in with</span><span className="h-px flex-1 bg-slate-200" /></div>
-          {googleClientId ? <div ref={googleButton} className="flex min-h-11 justify-center" /> : <button type="button" disabled title="Add VITE_GOOGLE_CLIENT_ID to enable Google sign-in" className="min-h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-400">Google Sign In · setup required</button>}
-          {window.PublicKeyCredential && navigator.credentials && <button type="button" disabled={busy} onClick={signInWithPasskey} className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-black bg-white px-4 text-sm font-bold text-black disabled:opacity-50"><Fingerprint size={18} /> Face ID / Passkey</button>}
           <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-500"><ShieldCheck size={15} /> Admin access</div>
         </div>
       </section>

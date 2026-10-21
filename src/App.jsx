@@ -963,7 +963,7 @@ export default function App() {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <AdminLoading />;
     if (adminUnlocked && role === 'admin') return <AdminLoading />;
     return <Suspense fallback={<AdminLoading />}>
-      <AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
+      <AdminErrorBoundary><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></AdminErrorBoundary>
     </Suspense>;
   }
 
@@ -971,7 +971,7 @@ export default function App() {
     if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <AdminLoading />;
     if (role && role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
     if (!adminUnlocked) {
-      return <Suspense fallback={<AdminLoading />}><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></Suspense>;
+      return <Suspense fallback={<AdminLoading />}><AdminErrorBoundary><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></AdminErrorBoundary></Suspense>;
     }
     const pages = {
       '/admin/overview': <Overview />,
