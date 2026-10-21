@@ -1,18 +1,22 @@
-import { useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, Fingerprint, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Fingerprint, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { startAuthentication } from '@simplewebauthn/browser';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
 
-export default function AdminLogin({ onSuccess }) {
+export default function AdminLogin({ onSuccess, hasActiveAdmin = false, activeAdminEmail = '', adminSessionOnThisDevice = false }) {
   const { loginAdmin, loginWithAdminPasskey } = useAuth();
-  const [email, setEmail] = useState('');
+  const rememberedEmail = localStorage.getItem('lastAdminEmail') || '';
+  const [email, setEmail] = useState(rememberedEmail);
   const [password, setPassword] = useState('');
-  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [useAnotherAccount, setUseAnotherAccount] = useState(!rememberedEmail);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
-  const [activeOnAnotherDevice, setActiveOnAnotherDevice] = useState(false);
+  const googleButton = useRef(null);
+  const googleCallback = useRef(null);
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  const restricted = hasActiveAdmin && !adminSessionOnThisDevice;
   const passkeySupported = Boolean(window.PublicKeyCredential && navigator.credentials);
 
   const showMessage = (text, error = false) => {
@@ -20,120 +24,137 @@ export default function AdminLogin({ onSuccess }) {
     setIsError(error);
   };
 
-  const handlePasswordLogin = async event => {
-    event.preventDefault();
+  googleCallback.current = async credential => {
     setBusy(true);
     showMessage('');
     try {
-      await loginAdmin(email, password);
+      const { data } = await api.post('/auth/google', { idToken: credential });
+      loginWithAdminPasskey(data);
+      localStorage.setItem('lastAdminEmail', data.user.email);
       onSuccess?.();
     } catch (error) {
-      const detail = error.response?.data?.detail || '';
-      if (error.response?.headers?.['x-admin-session-active'] === 'true' || /already signed in on another phone/i.test(detail)) {
-        setActiveOnAnotherDevice(true);
+      showMessage(error.response?.data?.detail || 'Google sign-in could not be completed.', true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!googleClientId || restricted || !googleButton.current) return undefined;
+    let cancelled = false;
+    const renderGoogleButton = () => {
+      if (cancelled || !googleButton.current || !window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: response => googleCallback.current?.(response.credential),
+      });
+      window.google.accounts.id.renderButton(googleButton.current, {
+        theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', width: 360,
+      });
+    };
+    if (window.google?.accounts?.id) {
+      renderGoogleButton();
+    } else {
+      let script = document.querySelector('script[data-google-identity]');
+      if (!script) {
+        script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.dataset.googleIdentity = 'true';
+        document.head.appendChild(script);
       }
-      if (error.response?.status === 403 && /configured admin/i.test(detail)) {
-        showMessage('Only admin can sign in — access denied.', true);
-      } else {
-        showMessage(detail || 'Check your email and password, then try again.', true);
-      }
+      script.addEventListener('load', renderGoogleButton, { once: true });
+    }
+    return () => { cancelled = true; };
+  }, [googleClientId, restricted]);
+
+  const handlePasswordLogin = async event => {
+    event.preventDefault();
+    if (restricted) return;
+    setBusy(true);
+    showMessage('');
+    try {
+      const signedInUser = await loginAdmin(email, password);
+      localStorage.setItem('lastAdminEmail', signedInUser.email);
+      onSuccess?.();
+    } catch (error) {
+      showMessage(error.response?.data?.detail || 'Check your email and password, then try again.', true);
     } finally {
       setBusy(false);
     }
   };
 
   const handlePasskeyLogin = async () => {
+    if (restricted) return;
     setBusy(true);
     showMessage('');
     try {
-      if (!passkeySupported) {
-        throw new Error('This browser cannot use a device passkey. Try a browser with biometric or secure screen-lock support.');
-      }
+      if (!passkeySupported) throw new Error('This browser does not support a device passkey. Try a browser with biometric or secure screen-lock support.');
       const { data: ceremony } = await api.post('/auth/passkey/login/begin');
       const credential = await startAuthentication({ optionsJSON: ceremony.options });
       const { data } = await api.post('/auth/passkey/login/finish', { challenge_token: ceremony.challenge_token, credential });
       loginWithAdminPasskey(data);
+      localStorage.setItem('lastAdminEmail', data.user.email);
       onSuccess?.();
     } catch (error) {
-      const detail = error.response?.data?.detail || error.message || 'Passkey verification failed.';
-      if (error.response?.headers?.['x-admin-session-active'] === 'true' || /already signed in on another phone/i.test(detail)) {
-        setActiveOnAnotherDevice(true);
-      }
-      showMessage(detail, true);
+      showMessage(error.response?.data?.detail || error.message || 'Passkey verification failed.', true);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#fbf7f6] px-4 py-8 text-slate-900 sm:px-6">
-      <div aria-hidden="true" className="pointer-events-none absolute -left-28 top-[-8rem] h-80 w-80 rounded-full bg-rose-200/50 blur-3xl" />
-      <div aria-hidden="true" className="pointer-events-none absolute -bottom-40 right-[-6rem] h-96 w-96 rounded-full bg-pink-100/70 blur-3xl" />
+    <main className="grid min-h-screen place-items-center bg-white px-4 py-10 text-slate-950">
+      <section className="w-full max-w-md rounded-2xl border border-black bg-white p-6 shadow-xl sm:p-9">
+        <a href="/" className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-slate-600 hover:text-black"><ArrowLeft size={16} /> Back to store</a>
 
-      {activeOnAnotherDevice && <div className="fixed inset-0 z-[1000] grid place-items-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-labelledby="active-admin-title">
-        <section className="w-full max-w-sm rounded-3xl border border-rose-100 bg-white p-7 text-center shadow-2xl">
-          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-700"><ShieldCheck size={24} /></div>
-          <h2 id="active-admin-title" className="mt-4 text-lg font-bold">Admin already signed in</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Admin is active on another phone. Only that signed-in device can access the portal.</p>
-          <button type="button" onClick={() => setActiveOnAnotherDevice(false)} className="mt-5 min-h-11 w-full rounded-xl bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800">Close</button>
-        </section>
-      </div>}
+        <div className="mt-7 flex items-center gap-3">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl border border-black bg-white"><LockKeyhole size={21} /></span>
+          <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Rabi's Chic</p><h1 className="text-2xl font-bold tracking-tight">Admin sign in</h1></div>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-slate-600">Sign in to manage products, orders, and store content.</p>
 
-      <div className="relative grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-rose-100 bg-white shadow-[0_28px_90px_-42px_rgba(136,19,55,0.38)] lg:min-h-[620px] lg:grid-cols-[0.9fr_1.1fr]">
-        <aside className="relative flex min-h-56 flex-col justify-between overflow-hidden bg-gradient-to-br from-rose-700 via-rose-600 to-pink-500 p-7 text-white sm:p-10 lg:min-h-full">
-          <div aria-hidden="true" className="absolute -right-24 -top-24 h-72 w-72 rounded-full border border-white/15" />
-          <div aria-hidden="true" className="absolute -right-12 -top-12 h-48 w-48 rounded-full border border-white/15" />
-          <div className="relative">
-            <a href="/" className="inline-flex items-center gap-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-white/80">
-              <span className="grid h-12 w-12 place-items-center rounded-2xl border border-white/35 bg-white/15 font-serif text-2xl font-bold shadow-sm">R</span>
-              <span><span className="block font-serif text-xl font-bold leading-tight">Rabi’s Chic</span><span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-100">Fashion &amp; Campus Essentials</span></span>
-            </a>
-          </div>
-          <div className="relative mt-8 max-w-md lg:mb-8 lg:mt-20">
-            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-rose-100">Store administration</p>
-            <h1 className="mt-3 font-serif text-3xl font-bold leading-tight sm:text-4xl">Welcome back to your store.</h1>
-            <p className="mt-4 max-w-sm text-sm leading-6 text-white/85">Sign in to manage orders, products, and the Rabi’s Chic storefront.</p>
-            <div className="mt-7 flex items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15"><ShieldCheck size={20} /></span>
-              <span><span className="block text-xs font-bold">Private admin access</span><span className="mt-1 block text-[11px] leading-4 text-white/75">Only the enrolled device can open the portal.</span></span>
+        {restricted && <div role="alert" className="mt-5 rounded-xl border border-red-700 bg-white p-4 text-sm text-red-800">
+          <p className="font-bold">Restricted to admin only.</p>
+          <p className="mt-1">{activeAdminEmail || 'An administrator'} is currently signed in. Please ask them to log out first.</p>
+        </div>}
+
+        {rememberedEmail && !useAnotherAccount ? (
+          <div className="mt-6 rounded-2xl border border-black p-5">
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-black text-lg font-bold text-white">{rememberedEmail.slice(0, 1).toUpperCase()}</span>
+              <div className="min-w-0"><p className="font-bold">Welcome back</p><p className="truncate text-sm text-slate-600">{rememberedEmail}</p></div>
             </div>
+            <button type="button" disabled={busy || restricted} onClick={() => { setUseAnotherAccount(true); setEmail(rememberedEmail); }} className="mt-5 min-h-12 w-full rounded-xl bg-black px-4 text-sm font-bold text-white disabled:opacity-50">Quick Sign In</button>
+            <button type="button" disabled={busy || restricted || !passkeySupported} onClick={handlePasskeyLogin} className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-black bg-white px-4 text-sm font-bold text-black disabled:opacity-50"><Fingerprint size={18} /> Face ID / Device Passkey</button>
+            <button type="button" onClick={() => { setUseAnotherAccount(true); setEmail(''); setPassword(''); showMessage(''); }} className="mt-4 min-h-10 w-full text-sm font-semibold text-slate-600 underline underline-offset-4">Use another account</button>
+            <p className="mt-3 text-center text-xs leading-5 text-slate-500">Quick Sign In opens the saved account form. Face ID uses your device passkey.</p>
           </div>
-          <p className="relative mt-8 text-[10px] font-medium text-white/70">Secure access for the store administrator</p>
-        </aside>
-
-        <section className="flex items-center justify-center p-6 sm:p-10 lg:p-12">
-          <div className="w-full max-w-md">
-            <a href="/" className="inline-flex min-h-9 items-center gap-2 text-xs font-semibold text-slate-500 transition hover:text-rose-700"><ArrowLeft size={15} /> Back to store</a>
-            <div className="mt-7">
-              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-rose-50 text-rose-700"><LockKeyhole size={20} /></div>
-              <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-600">Administrator sign in</p>
-              <h2 className="mt-1 font-serif text-3xl font-bold tracking-tight text-slate-950">Secure access</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">Use your store credentials or the passkey enrolled on this device.</p>
-            </div>
-
-            <form onSubmit={handlePasswordLogin} className="mt-7 space-y-4">
-              <label className="block text-xs font-bold text-slate-700">Admin email
-                <input type="email" required autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-100" />
+        ) : (
+          <>
+            <form onSubmit={handlePasswordLogin} className="mt-6 space-y-4">
+              <label className="block text-sm font-semibold">Admin email
+                <input type="email" required autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" disabled={restricted} className="mt-1.5 min-h-12 w-full rounded-xl border border-black bg-white px-3.5 text-sm outline-none focus:ring-2 focus:ring-black/15 disabled:bg-slate-100" />
               </label>
-              <label className="block text-xs font-bold text-slate-700">Password
-                <span className="relative mt-1.5 block">
-                  <input type={passwordVisible ? 'text' : 'password'} required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Enter your admin password" className="min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 pr-12 text-sm outline-none transition placeholder:text-slate-400 focus:border-rose-500 focus:ring-4 focus:ring-rose-100" />
-                  <button type="button" onClick={() => setPasswordVisible(value => !value)} aria-label={passwordVisible ? 'Hide password' : 'Show password'} className="absolute inset-y-0 right-0 grid w-12 place-items-center text-slate-400 hover:text-slate-700">{passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}</button>
-                </span>
+              <label className="block text-sm font-semibold">Password
+                <input type="password" required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Enter your admin password" disabled={restricted} className="mt-1.5 min-h-12 w-full rounded-xl border border-black bg-white px-3.5 text-sm outline-none focus:ring-2 focus:ring-black/15 disabled:bg-slate-100" />
               </label>
-              <button type="submit" disabled={busy} className="flex min-h-12 w-full items-center justify-center rounded-xl bg-slate-950 px-4 text-sm font-bold text-white shadow-lg shadow-slate-900/10 transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60">{busy ? 'Signing in…' : 'Sign In to Admin Portal'}</button>
+              <button type="submit" disabled={busy || restricted} className="min-h-12 w-full rounded-xl bg-black px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Signing in…' : 'Sign In'}</button>
             </form>
 
-            <div className="my-5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>Or continue with</span><span className="h-px flex-1 bg-slate-200" /></div>
-            <button type="button" disabled={busy} onClick={handlePasskeyLogin} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-800 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-50">
-              <Fingerprint size={18} /> Use this device’s passkey
-            </button>
-            <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">Your fingerprint or Face ID stays on your device. The device may ask for its secure screen lock instead.</p>
-            {message && <p role={isError ? 'alert' : 'status'} className={`mt-4 rounded-xl px-3 py-2.5 text-center text-xs font-semibold ${isError ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{message}</p>}
-            <p className="mt-7 text-center text-[10px] font-medium text-slate-400">Protected store access · Rabi’s Chic</p>
-          </div>
-        </section>
-      </div>
+            {rememberedEmail && <button type="button" onClick={() => { setUseAnotherAccount(false); setEmail(rememberedEmail); setPassword(''); showMessage(''); }} className="mt-3 min-h-9 w-full text-center text-xs font-semibold text-slate-600 underline underline-offset-4">Back to {rememberedEmail}</button>}
+
+            <div className="my-5 flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>Or</span><span className="h-px flex-1 bg-slate-200" /></div>
+            {passkeySupported && <button type="button" disabled={busy || restricted} onClick={handlePasskeyLogin} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-black bg-white px-4 text-sm font-bold text-black disabled:opacity-50"><Fingerprint size={18} /> Face ID / Device Passkey</button>}
+            {googleClientId && !restricted ? <div ref={googleButton} className="mt-3 flex min-h-11 justify-center" /> : <button type="button" disabled className="mt-3 min-h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-400" title="Set VITE_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_ID to enable Google sign-in">{restricted ? 'Google Sign In unavailable during another admin session' : 'Google Sign In · setup required'}</button>}
+            {!googleClientId && <p className="mt-1 text-center text-[11px] text-slate-500">Google sign-in becomes available after its OAuth client ID is added to the app and server.</p>}
+          </>
+        )}
+
+        {message && <p role={isError ? 'alert' : 'status'} className={`mt-4 rounded-xl border p-3 text-center text-sm font-semibold ${isError ? 'border-red-700 text-red-800' : 'border-black text-slate-800'}`}>{message}</p>}
+        <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-500"><ShieldCheck size={15} /> Private access for the store administrator</div>
+      </section>
     </main>
   );
 }

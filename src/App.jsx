@@ -10,6 +10,7 @@ import ApprovalStatus from './components/ApprovalStatus';
 import WhatsAppButton from './components/WhatsAppButton';
 import ComboProductName from './components/ComboProductName';
 import Invoice from './components/Invoice';
+import AdminErrorBoundary from './components/AdminErrorBoundary';
 
 const SearchPage = lazy(() => import('./pages/Search'));
 const WishlistPage = lazy(() => import('./pages/Wishlist'));
@@ -109,11 +110,14 @@ const optimizeProductImage = (imageUrl) => {
   }
 };
 
+const AdminLoading = () => <main role="status" className="grid min-h-screen place-items-center bg-white p-6 text-center text-sm font-semibold text-slate-700">Loading Admin...</main>;
+
 export default function App() {
   const { user, role, authReady, adminUnlocked, adminSessionReady, loginAdmin, logout, confirmAdminLogout, unlockAdmin, lockAdmin } = useAuth();
   const [routePath, setRoutePath] = useState(() => window.location.pathname);
   const [hasActiveAdmin, setHasActiveAdmin] = useState(null);
   const [adminSessionOnThisDevice, setAdminSessionOnThisDevice] = useState(false);
+  const [activeAdminEmail, setActiveAdminEmail] = useState('');
   const [adminLogoutNotice, setAdminLogoutNotice] = useState(false);
   const [adminLogoutStep, setAdminLogoutStep] = useState(0);
   const [adminLogoutPassword, setAdminLogoutPassword] = useState('');
@@ -126,12 +130,23 @@ export default function App() {
     return () => window.removeEventListener('popstate', syncPath);
   }, []);
   useEffect(() => {
+    const aliases = {
+      '/admin-dashboard': '/admin',
+      '/rabia-admin-secure-2024': '/rabis-admin-secure-2024',
+    };
+    const canonicalPath = aliases[routePath];
+    if (!canonicalPath) return;
+    window.history.replaceState({}, '', canonicalPath);
+    setRoutePath(canonicalPath);
+  }, [routePath]);
+  useEffect(() => {
     let active = true;
-    const refresh = () => api.get('/admin/status').then(({ data }) => {
+    const refresh = () => api.get('/admin/session-status').then(({ data }) => {
       if (!active) return;
       setHasActiveAdmin(Boolean(data.hasActiveAdmin));
       setAdminSessionOnThisDevice(Boolean(data.isCurrentDevice));
-    }).catch(() => { if (active) { setHasActiveAdmin(true); setAdminSessionOnThisDevice(false); } });
+      setActiveAdminEmail(data.activeEmail || '');
+    }).catch(() => { if (active) { setHasActiveAdmin(false); setAdminSessionOnThisDevice(false); setActiveAdminEmail(''); } });
     refresh();
     const timer = window.setInterval(refresh, 5000);
     return () => { active = false; window.clearInterval(timer); };
@@ -563,6 +578,7 @@ export default function App() {
       await confirmAdminLogout(adminLogoutPassword);
       setHasActiveAdmin(false);
       setAdminSessionOnThisDevice(false);
+      setActiveAdminEmail('');
       setAdminLogoutNotice(true);
       setAdminLogoutStep(0);
       setAdminLogoutPassword('');
@@ -575,7 +591,7 @@ export default function App() {
   };
 
   const adminLogoutModal = adminLogoutStep > 0 ? <div className="fixed inset-0 z-[1200] grid place-items-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-labelledby="admin-logout-title"><section className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-    {adminLogoutStep === 1 ? <><h2 id="admin-logout-title" className="text-lg font-bold text-slate-900">Are you sure you want to logout?</h2><p className="mt-2 text-sm leading-6 text-slate-600">After logout, Admin Sign In becomes visible for handover. The next admin device will see the portal.</p><div className="mt-6 flex gap-2"><button type="button" onClick={() => setAdminLogoutStep(0)} className="min-h-11 flex-1 rounded-full bg-slate-100 px-4 text-sm font-bold text-slate-700">Cancel</button><button type="button" onClick={() => { setAdminLogoutStep(2); setAdminLogoutError(''); }} className="min-h-11 flex-1 rounded-full bg-slate-950 px-4 text-sm font-bold text-white">Yes, I want to logout</button></div></> : <><h2 id="admin-logout-title" className="text-lg font-bold text-slate-900">Confirm admin logout</h2><p className="mt-2 text-sm text-slate-600">Enter the admin password to confirm handover. This also removes the current device passkey so the next admin can enroll theirs.</p><div className="mt-4 flex gap-2"><input autoFocus type={adminLogoutPasswordVisible ? 'text' : 'password'} value={adminLogoutPassword} onChange={event => setAdminLogoutPassword(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') completeAdminLogout(); }} placeholder="Admin password" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><button type="button" onClick={() => setAdminLogoutPasswordVisible(value => !value)} className="rounded-xl border border-slate-200 px-3 text-xs font-semibold">{adminLogoutPasswordVisible ? 'Hide' : 'Show'}</button></div>{adminLogoutError && <p role="alert" className="mt-2 text-xs font-semibold text-red-600">{adminLogoutError}</p>}<div className="mt-6 flex gap-2"><button type="button" onClick={() => setAdminLogoutStep(1)} className="min-h-11 flex-1 rounded-full bg-slate-100 px-4 text-sm font-bold text-slate-700">Back</button><button type="button" disabled={adminLogoutBusy || !adminLogoutPassword} onClick={completeAdminLogout} className="min-h-11 flex-1 rounded-full bg-red-600 px-4 text-sm font-bold text-white disabled:opacity-50">{adminLogoutBusy ? 'Confirming…' : 'Confirm Logout'}</button></div></>}
+    {adminLogoutStep === 1 ? <><h2 id="admin-logout-title" className="text-lg font-bold text-slate-900">Are you sure you want to logout?</h2><p className="mt-2 text-sm leading-6 text-slate-600">After logout, Admin Sign In becomes visible. Your registered device passkey stays available for your next sign-in.</p><div className="mt-6 flex gap-2"><button type="button" onClick={() => setAdminLogoutStep(0)} className="min-h-11 flex-1 rounded-full bg-slate-100 px-4 text-sm font-bold text-slate-700">Cancel</button><button type="button" onClick={() => { setAdminLogoutStep(2); setAdminLogoutError(''); }} className="min-h-11 flex-1 rounded-full bg-black px-4 text-sm font-bold text-white">Yes, Log Out</button></div></> : <><h2 id="admin-logout-title" className="text-lg font-bold text-slate-900">Confirm admin logout</h2><p className="mt-2 text-sm text-slate-600">Enter the admin password to confirm logout. Your registered device passkey will stay available for your next sign-in.</p><div className="mt-4 flex gap-2"><input autoFocus type={adminLogoutPasswordVisible ? 'text' : 'password'} value={adminLogoutPassword} onChange={event => setAdminLogoutPassword(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') completeAdminLogout(); }} placeholder="Admin password" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><button type="button" onClick={() => setAdminLogoutPasswordVisible(value => !value)} className="rounded-xl border border-slate-200 px-3 text-xs font-semibold">{adminLogoutPasswordVisible ? 'Hide' : 'Show'}</button></div>{adminLogoutError && <p role="alert" className="mt-2 text-xs font-semibold text-red-600">{adminLogoutError}</p>}<div className="mt-6 flex gap-2"><button type="button" onClick={() => setAdminLogoutStep(1)} className="min-h-11 flex-1 rounded-full bg-slate-100 px-4 text-sm font-bold text-slate-700">Back</button><button type="button" disabled={adminLogoutBusy || !adminLogoutPassword} onClick={completeAdminLogout} className="min-h-11 flex-1 rounded-full bg-black px-4 text-sm font-bold text-white disabled:opacity-50">{adminLogoutBusy ? 'Confirming…' : 'Confirm Logout'}</button></div></>}
   </section></div> : null;
 
   const validateGhanaPhone = (phoneNum) => {
@@ -943,21 +959,19 @@ export default function App() {
     }
   }, [routePath, authReady, adminSessionReady, hasActiveAdmin, adminUnlocked]);
 
-  if (routePath === '/rabis-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
-    if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-slate-950" />;
-    if (adminUnlocked && role === 'admin') return <div className="min-h-screen bg-white" />;
-    if (hasActiveAdmin && !adminSessionOnThisDevice) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only that phone can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
-    return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}>
-      <AdminLogin onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
+  if (routePath === '/rabis-admin-secure-2024' || routePath === '/rabia-admin-secure-2024' || routePath === '/rabis-admin' || routePath === '/admin-secret-login-rabis2024') {
+    if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <AdminLoading />;
+    if (adminUnlocked && role === 'admin') return <AdminLoading />;
+    return <Suspense fallback={<AdminLoading />}>
+      <AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} />
     </Suspense>;
   }
 
   if (routePath.startsWith('/admin')) {
-    if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <div className="min-h-screen bg-white" />;
+    if (!authReady || !adminSessionReady || hasActiveAdmin === null) return <AdminLoading />;
     if (role && role !== 'admin') return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-red-50 text-red-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-500">This area is available to the store owner.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
     if (!adminUnlocked) {
-      if (hasActiveAdmin && !adminSessionOnThisDevice) return <main className="grid min-h-screen place-items-center bg-slate-50 p-6"><section className="w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-50 text-amber-700"><ShieldCheck size={26} /></div><h1 className="mt-4 text-xl font-bold text-slate-900">Restricted to Admin Only</h1><p className="mt-2 text-sm text-slate-600">Admin portal active on another phone. Only the signed-in device can see the portal.</p><button onClick={() => navigateTo('/')} className="mt-6 min-h-11 rounded-full bg-slate-950 px-5 text-sm font-bold text-white">Go to Store Home</button></section></main>;
-      return <Suspense fallback={<div className="min-h-screen bg-slate-950" />}><AdminLogin onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></Suspense>;
+      return <Suspense fallback={<AdminLoading />}><AdminLogin hasActiveAdmin={hasActiveAdmin} activeAdminEmail={activeAdminEmail} adminSessionOnThisDevice={adminSessionOnThisDevice} onSuccess={() => { setHasActiveAdmin(true); setAdminSessionOnThisDevice(true); setActiveAdminEmail(localStorage.getItem('lastAdminEmail') || ''); window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }} /></Suspense>;
     }
     const pages = {
       '/admin/overview': <Overview />,
@@ -983,11 +997,13 @@ export default function App() {
             <button onClick={() => { setAdminMessageAlert(null); window.history.pushState({}, '', '/admin/messages'); setRoutePath('/admin/messages'); }} className="mt-2 text-xs font-bold text-violet-700">View message</button></div>
           <button aria-label="Dismiss message notification" onClick={() => setAdminMessageAlert(null)} className="text-slate-400">Ã—</button></div>
       </div>}
-      <Suspense fallback={<div className="min-h-screen bg-rose-50/40" />}>
+      <Suspense fallback={<AdminLoading />}>
+        <AdminErrorBoundary>
         {routePath === '/admin' ? <AdminLayoutComp adminProfile={adminProfile}
           onNavigate={(next) => { window.history.pushState({}, '', next); setRoutePath(next); }}
           onLogout={logout} />
           : pages[routePath] || pages['/admin/overview']}
+        </AdminErrorBoundary>
       </Suspense>
       {adminLogoutModal}
     </>;
@@ -1193,11 +1209,11 @@ export default function App() {
 
             {/* Only an authenticated administrator sees the dashboard link. */}
             {isAdminAuthenticated && (
-              <button
-                onClick={() => { window.history.pushState({}, '', '/admin'); setRoutePath('/admin'); }}
+          <button
+                onClick={() => { window.history.pushState({}, '', '/admin-dashboard'); setRoutePath('/admin-dashboard'); }}
                 className="hidden lg:flex px-2.5 py-2 rounded-xl text-xs font-bold transition items-center gap-1 whitespace-nowrap bg-slate-900 text-white hover:bg-slate-800"
               >
-                <i className="fa-solid fa-user-shield"></i> Admin Portal
+                <span aria-hidden="true" className="h-2 w-2 rounded-full bg-emerald-400"></span><i className="fa-solid fa-user-shield"></i> Admin Portal
               </button>
             )}
           </div>
@@ -1208,7 +1224,7 @@ export default function App() {
 
       {adminLogoutNotice && <div role="status" className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-rose-950">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
-          <p className="text-sm"><span className="font-bold">Admin signed out.</span> The store is ready for the next admin sign in.</p>
+          <p className="text-sm"><span className="font-bold">You have logged out successfully.</span> Another person can now log in.</p>
           <div className="flex items-center gap-2"><button type="button" onClick={() => { setAdminLogoutNotice(false); navigateTo('/rabis-admin-secure-2024'); }} className="min-h-9 rounded-full bg-rose-700 px-4 text-xs font-bold text-white hover:bg-rose-800">Admin Sign In</button><button type="button" onClick={() => setAdminLogoutNotice(false)} aria-label="Dismiss sign-out notice" className="grid h-9 w-9 place-items-center rounded-full text-rose-800 hover:bg-rose-100"><X size={16} /></button></div>
         </div>
       </div>}
@@ -1348,29 +1364,30 @@ export default function App() {
                 
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Select Catalog Product Or Type Below</label>
-                    <select 
-                      value={checkoutData.selectedProductId}
-                      onChange={(e) => {
-                        const prodId = e.target.value;
-                        const p = products.find(x => x.id === Number(prodId));
-                        setCheckoutData({ ...checkoutData, selectedProductId: prodId, customItemName: p ? p.name : '' });
+                    <ComboProductName
+                      value={{ name: checkoutData.customItemName }}
+                      onChange={(selected) => {
+                        setCheckoutData({
+                          ...checkoutData,
+                          selectedProductId: selected.id || checkoutData.selectedProductId,
+                          customItemName: selected.name,
+                        });
                       }}
-                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs font-bold focus:outline-none focus:border-rose-500 mb-2"
-                    >
-                      {products.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} â€” {formatCurrency(p.price)}</option>
-                      ))}
-                    </select>
-
-                    <label className="block text-xs font-bold text-rose-600 uppercase mb-1 mt-3">Or Type Exact Item Name You Want</label>
-                    <input 
-                      type="text"
-                      placeholder="e.g. Lip Mask, Scrunchies, Official Clothes..."
-                      value={checkoutData.customItemName}
-                      onChange={(e) => setCheckoutData({ ...checkoutData, customItemName: e.target.value })}
-                      className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-xs focus:outline-none focus:border-rose-500 font-semibold"
+                      placeholder="Select from list or type item name"
+                      className="mb-2"
                     />
+                    {checkoutData.customItemName && !products.find(p => p.id === Number(checkoutData.selectedProductId) && p.name === checkoutData.customItemName) && (
+                      <div className="mt-2 animate-in fade-in slide-in-from-top-1">
+                        <label className="block text-xs font-bold text-rose-600 uppercase mb-1">Item Price (GH₵)</label>
+                        <input
+                          type="number"
+                          placeholder="Enter price for custom item"
+                          value={customPrice}
+                          onChange={(e) => setCustomPrice(e.target.value)}
+                          className="w-full px-4 py-3 rounded-2xl border border-rose-200 text-sm font-bold focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

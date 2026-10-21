@@ -33,7 +33,7 @@ export default function ImagePickerSheet({ isOpen, onClose, onSelect, title = "S
             <div className="grid grid-cols-1 gap-3">
               {/* Take Photo */}
               <label className="flex items-center gap-4 p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition group">
-                <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center group-hover:bg-rose-200 transition">
+                <div className="w-12 h-12 rounded-xl border border-black bg-white text-black flex items-center justify-center transition">
                   <i className="fa-solid fa-camera text-xl"></i>
                 </div>
                 <div className="flex-1">
@@ -51,7 +51,7 @@ export default function ImagePickerSheet({ isOpen, onClose, onSelect, title = "S
 
               {/* Photo Library */}
               <label className="flex items-center gap-4 p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition group">
-                <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center group-hover:bg-blue-200 transition">
+                <div className="w-12 h-12 rounded-xl border border-black bg-white text-black flex items-center justify-center transition">
                   <i className="fa-solid fa-images text-xl"></i>
                 </div>
                 <div className="flex-1">
@@ -68,7 +68,7 @@ export default function ImagePickerSheet({ isOpen, onClose, onSelect, title = "S
 
               {/* Files / Google Drive */}
               <label className="flex items-center gap-4 p-4 rounded-2xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition group">
-                <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center group-hover:bg-amber-200 transition">
+                <div className="w-12 h-12 rounded-xl border border-black bg-white text-black flex items-center justify-center transition">
                   <i className="fa-solid fa-file-import text-xl"></i>
                 </div>
                 <div className="flex-1">

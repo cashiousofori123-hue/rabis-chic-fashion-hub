@@ -576,6 +576,24 @@ class AdminLoginRequest(BaseModel):
     userAgent: str = Field(default="", max_length=500)
 
 
+class GoogleAdminLoginRequest(BaseModel):
+    idToken: str = Field(min_length=20, max_length=8192)
+
+
+class AdminUserCreateRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=10, max_length=128)
+    name: str = Field(default="Store Administrator", min_length=1, max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def validate_admin_email(cls, value: str) -> str:
+        email = value.strip().lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            raise ValueError("Enter a valid email address")
+        return email
+
+
 class AdminLogoutConfirmRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
@@ -638,9 +656,8 @@ def _is_allowed_image_reference(value: Any) -> bool:
 def _is_configured_admin(user: dict[str, Any] | None) -> bool:
     return bool(
         user
-        and ADMIN_EMAIL
         and user.get("role") == "admin"
-        and str(user.get("email", "")).strip().lower() == ADMIN_EMAIL
+        and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", str(user.get("email", "")).strip().lower())
     )
 
 
@@ -699,12 +716,17 @@ def _save_admin_session(session: dict[str, Any]) -> None:
 def _session_is_active(session: dict[str, Any] | None, now: datetime | None = None) -> bool:
     if not session or not session.get("isActive"):
         return False
-    # Admin access ends only through an explicit password-confirmed handover.
-    # Legacy sessions keep their existing expiry until the next sign-in.
-    if not session.get("expiresAt"):
-        return True
+    expiry_value = session.get("expiresAt")
+    if not expiry_value:
+        created_value = session.get("createdAt")
+        if not created_value:
+            return True
+        try:
+            expiry_value = (datetime.fromisoformat(str(created_value).replace("Z", "+00:00")) + timedelta(hours=24)).isoformat()
+        except (TypeError, ValueError):
+            return False
     try:
-        expires_at = datetime.fromisoformat(str(session.get("expiresAt", "")).replace("Z", "+00:00"))
+        expires_at = datetime.fromisoformat(str(expiry_value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return False
     return expires_at > (now or datetime.now(timezone.utc))
@@ -716,11 +738,12 @@ def create_access_token(
     admin_session_id: str | None = None,
     device_fingerprint: str | None = None,
 ) -> str:
-    # Admin JWTs have no timer; the device-bound server session revokes them
-    # during a confirmed logout. Ordinary user tokens keep their normal expiry.
+    # Device-bound admin tokens expire after 24 hours; ordinary user tokens keep
+    # their existing 30-day lifetime.
     payload = {"sub": email}
-    if not admin_session_id:
-        payload["exp"] = datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_DAYS)
+    payload["exp"] = datetime.now(timezone.utc) + (
+        timedelta(hours=24) if admin_session_id else timedelta(days=ACCESS_TOKEN_DAYS)
+    )
     if admin_unlocked:
         payload["admin_unlocked"] = True
     if admin_session_id:
@@ -779,6 +802,7 @@ def _create_admin_device_session(
     session_id = current.get("sessionId") if same_device else secrets.token_urlsafe(32)
     session = {
         "adminId": user["id"],
+        "adminEmail": user["email"],
         "deviceFingerprint": device_fingerprint,
         "deviceId": device_id,
         "sessionId": session_id,
@@ -787,7 +811,7 @@ def _create_admin_device_session(
         "userAgent": (request.headers.get("user-agent") or user_agent)[:500],
         "createdAt": current.get("createdAt", now_iso) if same_device else now_iso,
         "lastActiveAt": now_iso,
-        "expiresAt": None,
+        "expiresAt": (now + timedelta(hours=24)).isoformat(),
     }
     if storage.enabled():
         claimed, active_session = storage.claim_admin_session(session, now_iso)
@@ -908,17 +932,27 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
     recent.append(now_mono)
     _admin_login_rate_log[client_ip] = recent
     email = payload.email.strip().lower()
-    if not ADMIN_EMAIL or not secrets.compare_digest(email, ADMIN_EMAIL):
-        raise HTTPException(status_code=403, detail="Only the configured admin can sign in. Access denied.")
+    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
+    is_primary_admin = bool(ADMIN_EMAIL and secrets.compare_digest(email, ADMIN_EMAIL))
+    if not is_primary_admin and not _is_configured_admin(user):
+        raise HTTPException(status_code=403, detail="Only an authorized admin account can sign in.")
     configured_password = os.getenv("ADMIN_PASSWORD", "")
-    if not configured_password:
-        raise HTTPException(status_code=503, detail="Admin sign-in is not configured. Set ADMIN_PASSWORD in the server environment.")
-    password_matches = secrets.compare_digest(payload.password, configured_password)
+    if is_primary_admin and configured_password:
+        password_matches = secrets.compare_digest(payload.password, configured_password)
+        if password_matches and not _is_configured_admin(user):
+            user = _ensure_configured_admin_user(email, configured_password)
+    elif _is_configured_admin(user):
+        try:
+            password_matches = PASSWORD_CONTEXT.verify(payload.password, user.get("password", ""))
+        except (TypeError, ValueError):
+            password_matches = False
+    else:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin sign-in needs setup. Set the admin email and password in the server environment, then try again.",
+        )
     if not password_matches:
         raise HTTPException(status_code=401, detail="Invalid admin email or password")
-    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
-    if not _is_configured_admin(user):
-        user = _ensure_configured_admin_user(email, configured_password)
     if not _is_configured_admin(user):
         raise HTTPException(status_code=401, detail="Invalid admin email or password")
     if _list_passkeys(user["id"]):
@@ -936,6 +970,7 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
     session_id = current.get("sessionId") if same_device else secrets.token_urlsafe(32)
     session = {
         "adminId": user["id"],
+        "adminEmail": user["email"],
         "deviceFingerprint": payload.deviceFingerprint,
         "deviceId": payload.deviceId,
         "sessionId": session_id,
@@ -944,7 +979,7 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         "userAgent": request.headers.get("user-agent", payload.userAgent)[:500],
         "createdAt": current.get("createdAt", now_iso) if same_device else now_iso,
         "lastActiveAt": now_iso,
-        "expiresAt": None,
+        "expiresAt": (now + timedelta(hours=24)).isoformat(),
     }
     if storage.enabled():
         claimed, active_session = storage.claim_admin_session(session, now_iso)
@@ -965,17 +1000,89 @@ def admin_login(payload: AdminLoginRequest, request: Request) -> dict[str, Any]:
         "admin_access_token": admin_token,
         "token_type": "bearer",
         "user": public_user(user),
-        "session": {"createdAt": session["createdAt"], "expiresAt": None, "ip": session["ip"]},
+        "session": {"createdAt": session["createdAt"], "expiresAt": session["expiresAt"], "ip": session["ip"]},
+    }
+
+
+@app.post("/auth/google")
+def google_admin_login(
+    payload: GoogleAdminLoginRequest,
+    request: Request,
+    device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint"),
+    device_id: str = Header(default="", alias="X-Device-Id"),
+) -> dict[str, Any]:
+    client_ip = _request_ip(request) or "unknown"
+    now_mono = time.monotonic()
+    recent = [stamp for stamp in _admin_login_rate_log.get(client_ip, []) if now_mono - stamp < 600]
+    if len(recent) >= 10:
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Please wait 10 minutes and try again.")
+    recent.append(now_mono)
+    _admin_login_rate_log[client_ip] = recent
+
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    if not client_id:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured for this site.")
+
+    tokeninfo_url = "https://oauth2.googleapis.com/tokeninfo?" + urllib.parse.urlencode({"id_token": payload.idToken})
+    try:
+        with urllib.request.urlopen(tokeninfo_url, timeout=8) as response:
+            claims = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+        raise HTTPException(status_code=401, detail="Google sign-in could not be verified. Please try again.") from exc
+
+    try:
+        token_expiry = int(claims.get("exp", 0))
+    except (TypeError, ValueError):
+        token_expiry = 0
+    if (
+        claims.get("aud") != client_id
+        or claims.get("iss") not in {"accounts.google.com", "https://accounts.google.com"}
+        or str(claims.get("email_verified", "")).lower() != "true"
+        or token_expiry <= int(time.time())
+    ):
+        raise HTTPException(status_code=401, detail="This Google account is not authorized for admin access.")
+
+    email = str(claims.get("email", "")).strip().lower()
+    user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
+    if not _is_configured_admin(user):
+        if not ADMIN_EMAIL or email != ADMIN_EMAIL:
+            raise HTTPException(status_code=403, detail="This Google account is not authorized for admin access.")
+        configured_password = os.getenv("ADMIN_PASSWORD", "")
+        if not configured_password:
+            raise HTTPException(status_code=503, detail="Set the admin password once before using Google sign-in.")
+        user = _ensure_configured_admin_user(email, configured_password)
+    if not _is_configured_admin(user):
+        raise HTTPException(status_code=403, detail="This Google account is not configured as the store admin.")
+
+    _, regular_token, admin_token = _create_admin_device_session(
+        user,
+        request,
+        device_fingerprint,
+        device_id,
+        request.headers.get("user-agent", ""),
+    )
+    return {
+        "access_token": regular_token,
+        "admin_access_token": admin_token,
+        "token_type": "bearer",
+        "user": public_user(user),
     }
 
 
 @app.get("/admin/status")
-def admin_status(device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint")) -> dict[str, bool]:
+@app.get("/admin/session-status")
+def admin_status(device_fingerprint: str = Header(default="", alias="X-Device-Fingerprint")) -> dict[str, Any]:
     session = _get_admin_session()
     active = _session_is_active(session)
+    active_user = None
+    if active and session.get("adminId"):
+        active_user = storage.get_user_by_id(session["adminId"]) if storage.enabled() else next(
+            (entry for entry in USERS if entry.get("id") == session.get("adminId")), None
+        )
     return {
         "hasActiveAdmin": active,
         "isCurrentDevice": bool(active and device_fingerprint and secrets.compare_digest(device_fingerprint, str(session.get("deviceFingerprint", "")))),
+        "activeEmail": (active_user or {}).get("email", session.get("adminEmail", "")) if active else "",
     }
 
 
@@ -995,29 +1102,31 @@ def admin_session_check(
 
 
 @app.post("/admin/logout-confirm")
+@app.post("/admin/logout")
 def admin_logout_confirm(payload: AdminLogoutConfirmRequest, request: Request) -> dict[str, bool]:
     email = payload.email.strip().lower()
-    if not ADMIN_EMAIL or not secrets.compare_digest(email, ADMIN_EMAIL):
-        raise HTTPException(status_code=401, detail="Wrong password. Admin logout was not confirmed.")
     user = storage.get_user_by_email(email) if storage.enabled() else next((entry for entry in USERS if entry["email"] == email), None)
-    configured_password = os.getenv("ADMIN_PASSWORD", "")
-    if not configured_password:
-        raise HTTPException(status_code=503, detail="Admin sign-in is not configured. Set ADMIN_PASSWORD in the server environment.")
-    password_matches = secrets.compare_digest(payload.password, configured_password)
-    if user is None or not password_matches:
+    configured_password = os.getenv("ADMIN_PASSWORD", "") if ADMIN_EMAIL and secrets.compare_digest(email, ADMIN_EMAIL) else ""
+    try:
+        password_matches = (
+            secrets.compare_digest(payload.password, configured_password)
+            if configured_password
+            else bool(user and PASSWORD_CONTEXT.verify(payload.password, user.get("password", "")))
+        )
+    except (TypeError, ValueError):
+        password_matches = False
+    if not _is_configured_admin(user) or not password_matches:
         raise HTTPException(status_code=401, detail="Wrong password. Admin logout was not confirmed.")
     now = datetime.now(timezone.utc)
     session = _get_admin_session()
-    if not _session_is_active(session, now) or session.get("deviceFingerprint") != payload.deviceFingerprint:
+    if not _session_is_active(session, now) or session.get("adminId") != user["id"] or session.get("deviceFingerprint") != payload.deviceFingerprint:
         raise HTTPException(status_code=403, detail="This device does not own the active admin session")
     session.update(isActive=False, expiresAt=now.isoformat(), endedAt=now.isoformat(), logoutIp=_request_ip(request))
     if storage.enabled():
-        storage.complete_admin_handover(session, user["id"])
+        storage.set_admin_session(session)
     else:
         with DATA_LOCK:
             _save_admin_session(session)
-            PASSKEYS[:] = [passkey for passkey in PASSKEYS if passkey.get("userId") != user["id"]]
-            write_data("passkeys.json", PASSKEYS)
     return {"success": True}
 
 
@@ -1066,7 +1175,15 @@ def unlock_admin_with_password(
     admin: dict[str, Any] = Depends(get_current_admin_identity),
 ) -> dict[str, str]:
     configured_password = os.getenv("ADMIN_PASSWORD", "")
-    if not configured_password or not secrets.compare_digest(payload.password, configured_password):
+    try:
+        password_matches = (
+            secrets.compare_digest(payload.password, configured_password)
+            if configured_password
+            else PASSWORD_CONTEXT.verify(payload.password, admin.get("password", ""))
+        )
+    except (TypeError, ValueError):
+        password_matches = False
+    if not password_matches:
         raise HTTPException(status_code=401, detail="Password did not match")
     session = _get_admin_session()
     return {"admin_access_token": create_access_token(admin["email"], admin_unlocked=True, admin_session_id=session.get("sessionId"), device_fingerprint=session.get("deviceFingerprint"))}
@@ -1502,6 +1619,60 @@ def delete_product(product_id: int, _: dict[str, Any] = Depends(get_current_admi
             PRODUCTS[:] = [entry for entry in PRODUCTS if int(entry["id"]) != product_id]
             write_data("products.json", PRODUCTS)
     return {"message": "Product deleted"}
+
+
+@app.get("/admins/list")
+def list_admin_users(_: dict[str, Any] = Depends(get_current_admin)) -> list[dict[str, Any]]:
+    users = storage.list_users("admin") if storage.enabled() else [user for user in USERS if user.get("role") == "admin"]
+    return [public_user(user) for user in users]
+
+
+@app.post("/admins/add")
+def add_admin_user(payload: AdminUserCreateRequest, _: dict[str, Any] = Depends(get_current_admin)) -> dict[str, Any]:
+    email = payload.email.strip().lower()
+    existing = storage.get_user_by_email(email) if storage.enabled() else next((user for user in USERS if user.get("email", "").lower() == email), None)
+    if existing:
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+    candidate = {
+        "id": str(uuid4()),
+        "email": email,
+        "name": payload.name.strip() or "Store Administrator",
+        "password": PASSWORD_CONTEXT.hash(payload.password),
+        "role": "admin",
+    }
+    if storage.enabled():
+        created = storage.create_user(candidate, ADMIN_EMAIL)
+        if created.get("error") == "exists":
+            raise HTTPException(status_code=409, detail="An account with this email already exists.")
+        created = storage.set_user_role(candidate["id"], "admin")
+        if not created:
+            raise HTTPException(status_code=500, detail="Could not add this admin account.")
+        candidate = created
+    else:
+        with DATA_LOCK:
+            if any(user.get("email", "").lower() == email for user in USERS):
+                raise HTTPException(status_code=409, detail="An account with this email already exists.")
+            USERS.append(candidate)
+            write_data("users.json", USERS)
+    return public_user(candidate)
+
+
+@app.delete("/admins/{user_id}")
+def remove_admin_user(user_id: str, current_admin: dict[str, Any] = Depends(get_current_admin)) -> dict[str, str]:
+    target = storage.get_user_by_id(user_id) if storage.enabled() else next((user for user in USERS if user.get("id") == user_id), None)
+    if not _is_configured_admin(target):
+        raise HTTPException(status_code=404, detail="Admin account not found.")
+    if target["id"] == current_admin["id"] or (ADMIN_EMAIL and target["email"].lower() == ADMIN_EMAIL):
+        raise HTTPException(status_code=403, detail="The current admin and configured owner account cannot be removed.")
+    if storage.enabled():
+        storage.set_user_role(user_id, "customer")
+    else:
+        target["role"] = "customer"
+        PASSKEYS[:] = [passkey for passkey in PASSKEYS if passkey.get("userId") != user_id]
+        with DATA_LOCK:
+            write_data("users.json", USERS)
+            write_data("passkeys.json", PASSKEYS)
+    return {"message": "Admin access removed."}
 
 
 @app.get("/users/pending")

@@ -94,6 +94,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('rabi_access_token', data.access_token);
     localStorage.setItem('rabi_admin_access_token', data.admin_access_token);
     localStorage.setItem('rabi_user', JSON.stringify(data.user));
+    localStorage.setItem('lastAdminEmail', data.user.email);
     setUser(data.user);
     setAdminUnlocked(true);
     setAdminSessionReady(true);
@@ -121,7 +122,7 @@ export function AuthProvider({ children }) {
 
   const confirmAdminLogout = async (password) => {
     const identity = getDeviceIdentity();
-    await api.post('/admin/logout-confirm', { email: user?.email || '', password, deviceFingerprint: identity.fingerprint });
+    await api.post('/admin/logout', { email: user?.email || '', password, deviceFingerprint: identity.fingerprint });
     clearLocalSession();
   };
 
@@ -135,6 +136,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('rabi_access_token', session.access_token);
     localStorage.setItem('rabi_admin_access_token', session.admin_access_token);
     localStorage.setItem('rabi_user', JSON.stringify(session.user));
+    localStorage.setItem('lastAdminEmail', session.user.email);
     setUser(session.user);
     setAdminUnlocked(true);
     setAdminSessionReady(true);
